@@ -40,7 +40,9 @@
     vga_bios: { url: root + "bios/vgabios.bin" },
     bzimage: { url: root + "images/bzImage" },
     initrd: { url: root + "images/rootfs.cpio.gz" },
-    cmdline: "console=ttyS0 rdinit=/init" + (labDir ? " lab.dir=" + labDir : ""),
+    // Example pages keep kernel chatter (boot log, segfault reports) off the
+    // terminal; the kernel lab shows everything.
+    cmdline: "console=ttyS0 rdinit=/init" + (labDir ? " loglevel=4 lab.dir=" + labDir : ""),
     // Empty 9p filesystem; uploaded files appear in the guest at /mnt/host
     filesystem: {},
     // Input goes through xterm.js only; keep v86 from grabbing page keys.

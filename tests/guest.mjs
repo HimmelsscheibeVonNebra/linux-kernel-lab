@@ -11,6 +11,9 @@ const p = (rel) => path.join(root, rel);
 const BOOT_TIMEOUT_MS = 240_000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The serial log is kept one byte per character; programs print UTF-8.
+const utf8 = (bytes) => Buffer.from(bytes, "latin1").toString("utf8").replace(/\r/g, "");
+
 // labDir: "" for the root shell, or a class directory for the student shell
 // (same meaning as data-lab-dir on the pages).
 export async function bootGuest(labDir = "") {
@@ -22,7 +25,8 @@ export async function bootGuest(labDir = "") {
     vga_bios: { url: p("bios/vgabios.bin") },
     bzimage: { url: p("images/bzImage") },
     initrd: { url: p("images/rootfs.cpio.gz") },
-    cmdline: "console=ttyS0 rdinit=/init" + (labDir ? " lab.dir=" + labDir : ""),
+    // Same command line as js/lab.js
+    cmdline: "console=ttyS0 rdinit=/init" + (labDir ? " loglevel=4 lab.dir=" + labDir : ""),
     filesystem: {},
     autostart: true,
   });
@@ -68,13 +72,13 @@ export async function bootGuest(labDir = "") {
       }
       const status = parseInt(serial.slice(idx + marker.length), 10);
       const echoEnd = serial.indexOf("\n", from) + 1;
-      return { out: serial.slice(echoEnd, idx).replace(/\r/g, ""), status, timedOut: false };
+      return { out: utf8(serial.slice(echoEnd, idx)), status, timedOut: false };
     } catch (err) {
       emulator.serial0_send("\x03");
       await sleep(500);
       emulator.serial0_send("\x03\n");
       await sleep(1000);
-      return { out: serial.slice(from).replace(/\r/g, ""), status: -1, timedOut: true };
+      return { out: utf8(serial.slice(from)), status: -1, timedOut: true };
     }
   }
 

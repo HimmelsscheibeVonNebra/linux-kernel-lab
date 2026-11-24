@@ -3,6 +3,7 @@
 #
 #   scripts/build-images.sh            full build (first run: toolchain + kernel)
 #   scripts/build-images.sh modules    rebuild only exercises/ + sysprog/ + rootfs
+#   scripts/build-images.sh rebuild busybox ...   rebuild the named packages
 #   scripts/build-images.sh shell      open a shell in the build container
 #
 # Environment:
@@ -36,7 +37,11 @@ case "$MODE" in
 shell)
 	TTY=1 run bash
 	;;
-all|modules)
+all|modules|rebuild)
+	# Packages to rebuild from scratch before the incremental build
+	REBUILD=""
+	[ "$MODE" = modules ] && REBUILD="kernellab-modules sysprog-examples"
+	[ "$MODE" = rebuild ] && REBUILD="${*:2}"
 	run bash -euo pipefail -c '
 		if [ ! -d buildroot ]; then
 			wget -q "https://buildroot.org/downloads/buildroot-$BR_VERSION.tar.xz"
@@ -46,16 +51,16 @@ all|modules)
 		fi
 		br() { make -C buildroot O=/work/output BR2_EXTERNAL=/src/buildroot-external BR2_JLEVEL="$JOBS" "$@"; }
 		br kernellab_defconfig
-		if [ "'"$MODE"'" = modules ]; then
-			br kernellab-modules-dirclean sysprog-examples-dirclean
-		fi
+		for pkg in '"$REBUILD"'; do
+			br "$pkg-dirclean"
+		done
 		br
 		cp output/images/bzImage output/images/rootfs.cpio.gz /src/images/
 		ls -l /src/images/
 	'
 	;;
 *)
-	echo "usage: $0 [all|modules|shell]" >&2
+	echo "usage: $0 [all|modules|rebuild <package>...|shell]" >&2
 	exit 2
 	;;
 esac

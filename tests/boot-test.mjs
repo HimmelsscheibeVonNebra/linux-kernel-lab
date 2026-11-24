@@ -22,7 +22,9 @@ try {
   console.log(`booted to shell in ${guest.bootSeconds.toFixed(1)}s`);
 
   let r = await sh("uname -srm; id -u");
-  check("root shell on the 32-bit lab kernel", /Linux \S+-kernellab i686\n0\n/.test(r.out), r.out);
+  // Kernel messages share the console and can land between output lines,
+  // so match lines individually rather than as one block.
+  check("root shell on the 32-bit lab kernel", /Linux \S+-kernellab i686/.test(r.out) && /^0$/m.test(r.out), r.out);
 
   // 01 hello
   r = await sh("insmod /root/hello.ko && dmesg | tail -n 3");
@@ -41,7 +43,7 @@ try {
 
   // 03 sysfs
   r = await sh("insmod /root/sysfs_demo.ko && cat /sys/kernel/kernellab/value && echo 42 > /sys/kernel/kernellab/value && cat /sys/kernel/kernellab/value");
-  check("03 sysfs: value reads 0 then 42", r.status === 0 && /^0\n(.*\n)*42\n/m.test(r.out), r.out);
+  check("03 sysfs: value reads 0 then 42", r.status === 0 && /^0$/m.test(r.out) && /^42$/m.test(r.out), r.out);
   r = await sh("rmmod sysfs_demo; test ! -e /sys/kernel/kernellab");
   check("03 sysfs: kobject removed on rmmod", r.status === 0, r.out);
 

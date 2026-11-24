@@ -1,0 +1,8 @@
+# Applets the example pages use that Buildroot's default BusyBox lacks.
+CONFIG_STAT=y
+CONFIG_FEATURE_STAT_FORMAT=y
+CONFIG_FEATURE_STAT_FILESYSTEM=y
+CONFIG_TIMEOUT=y
+CONFIG_PGREP=y
+CONFIG_PKILL=y
+CONFIG_PSTREE=y

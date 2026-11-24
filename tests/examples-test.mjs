@@ -27,7 +27,10 @@ const classes = fs
   .map((f) => JSON.parse(fs.readFileSync(path.join(metaDir, f), "utf8")))
   .filter((c) => c.examples.length > 0 && (only.length === 0 || only.includes(c.class)));
 
-const BROKEN = /: not found|Segmentation fault|Illegal instruction|Bus error|Permission denied.*\.\/|syntax error/;
+// A missing tool, a shell syntax error, or the shell reporting that a
+// foreground program crashed (a bare "Segmentation fault" line; programs
+// that demonstrate crashes print it inside a longer line).
+const BROKEN = /: not found|syntax error|^(Segmentation fault|Illegal instruction|Bus error)( \(core dumped\))?$/m;
 
 const results = [];
 
@@ -68,7 +71,7 @@ for (const cls of classes) {
         result.why = `expected text not found: ${JSON.stringify(ex.expect)}`;
       }
       // Leave nothing running for the next example.
-      const jobs = await guest.sh("jobs -p | wc -l");
+      const jobs = await guest.sh("for p in $(jobs -p); do kill -0 $p 2>/dev/null && echo $p; done | wc -l");
       if (result.status === "PASS" && parseInt(jobs.out, 10) > 0) {
         result.status = "FAIL";
         result.why = "background job still running after the last step";

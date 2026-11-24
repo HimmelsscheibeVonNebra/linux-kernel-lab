@@ -7,7 +7,11 @@ set -eu
 cd "$1"
 CROSS_CC="$2"
 
-printf '#!/bin/sh\nexec %s "$@" -Wno-error\n' "$CROSS_CC" > cc-lab
+# -Wno-error: the examples target 64-bit Ubuntu; 32-bit warnings must not stop
+#   the build.
+# -fno-builtin-malloc: newer GCC removes malloc/free pairs whose result is only
+#   tested, which defeats demos such as limit_lab's RLIMIT_AS check.
+printf '#!/bin/sh\nexec %s "$@" -Wno-error -fno-builtin-malloc\n' "$CROSS_CC" > cc-lab
 chmod +x cc-lab
 CC_LAB="$(pwd)/cc-lab"
 
