@@ -13,15 +13,930 @@
     <p>POSIX 공유 메모리(shm_open · mmap)와 그 위의 경쟁 상태, 세마포어로 만드는 잠금과 생산자–소비자, 스레드의 뮤텍스 · 조건 변수 · 계수 세마포어를 다루는 예제입니다.</p>
   </header>
   <main class="list">
-    <ul class="cards">
-      <li><a href="shmhello.html"><strong>shmhello</strong><span>shm_open · ftruncate · mmap(MAP_SHARED)으로 이름 있는 공유 메모리 /w13_hello 에 글을 써 두고, 서로 무관한 다른 프로세스가 같은 이름으로 붙여 읽습니다.</span></a></li>
-      <li><a href="shmrace.html"><strong>shmrace</strong><span>공유 메모리 /w13_counter 의 count를 여러 프로세스가 잠금 없이 올려, 갱신이 사라지는 경쟁 상태를 관찰합니다.</span></a></li>
-      <li><a href="semcount.html"><strong>semcount</strong><span>shmrace와 같은 공유 카운터를 프로세스 간 세마포어(sem_wait · sem_post)로 잠그고 올립니다. hold · try · value로 잠금이 쥐어진 상태, sem_timedwait의 시간 제한, 잠근 채 죽은 프로세스의 문제를 확인합니다.</span></a></li>
-      <li><a href="ringbuf.html"><strong>ringbuf</strong><span>공유 메모리에 놓은 8칸 원형 버퍼와 세마포어 셋(slots · items · mutex)으로 프로세스 사이의 생산자–소비자를 만듭니다. 가득 차면 생산자가, 비면 소비자가 잠듭니다.</span></a></li>
-      <li><a href="thcount.html"><strong>thcount</strong><span>스레드 여럿이 전역 변수 하나를 올립니다. 잠금 없이(none), 뮤텍스로(mutex), 세마포어로(sem) 올린 결과를 기대값과 비교합니다.</span></a></li>
-      <li><a href="thqueue.html"><strong>thqueue</strong><span>뮤텍스 하나와 조건 변수 둘(not_full · not_empty)로 8칸 버퍼의 생산자–소비자를 스레드로 만듭니다. pthread_cond_wait를 while로 감싸는 이유와 종료 알림(broadcast)을 보여 줍니다.</span></a></li>
-      <li><a href="thlimit.html"><strong>thlimit</strong><span>계수 세마포어(처음 값 K)로 한 번에 K개 스레드만 임계 구역에 들어가게 합니다. 안에 있는 수와 최댓값은 뮤텍스로 지킵니다.</span></a></li>
-    </ul>
+    <section>
+      <h2>실행해 볼 예제</h2>
+      <ul class="cards">
+        <li><a href="shmhello.html"><strong>shmhello</strong><span>shm_open · ftruncate · mmap(MAP_SHARED)으로 이름 있는 공유 메모리 /w13_hello 에 글을 써 두고, 서로 무관한 다른 프로세스가 같은 이름으로 붙여 읽습니다.</span></a></li>
+        <li><a href="shmrace.html"><strong>shmrace</strong><span>공유 메모리 /w13_counter 의 count를 여러 프로세스가 잠금 없이 올려, 갱신이 사라지는 경쟁 상태를 관찰합니다.</span></a></li>
+        <li><a href="semcount.html"><strong>semcount</strong><span>shmrace와 같은 공유 카운터를 프로세스 간 세마포어(sem_wait · sem_post)로 잠그고 올립니다. hold · try · value로 잠금이 쥐어진 상태, sem_timedwait의 시간 제한, 잠근 채 죽은 프로세스의 문제를 확인합니다.</span></a></li>
+        <li><a href="ringbuf.html"><strong>ringbuf</strong><span>공유 메모리에 놓은 8칸 원형 버퍼와 세마포어 셋(slots · items · mutex)으로 프로세스 사이의 생산자–소비자를 만듭니다. 가득 차면 생산자가, 비면 소비자가 잠듭니다.</span></a></li>
+        <li><a href="thcount.html"><strong>thcount</strong><span>스레드 여럿이 전역 변수 하나를 올립니다. 잠금 없이(none), 뮤텍스로(mutex), 세마포어로(sem) 올린 결과를 기대값과 비교합니다.</span></a></li>
+        <li><a href="thqueue.html"><strong>thqueue</strong><span>뮤텍스 하나와 조건 변수 둘(not_full · not_empty)로 8칸 버퍼의 생산자–소비자를 스레드로 만듭니다. pthread_cond_wait를 while로 감싸는 이유와 종료 알림(broadcast)을 보여 줍니다.</span></a></li>
+        <li><a href="thlimit.html"><strong>thlimit</strong><span>계수 세마포어(처음 값 K)로 한 번에 K개 스레드만 임계 구역에 들어가게 합니다. 안에 있는 수와 최댓값은 뮤텍스로 지킵니다.</span></a></li>
+      </ul>
+    </section>
+    <article class="notes">
+<p>이번 차시의 주제는 "함께 보고, 때를 맞춘다"입니다. 여러 프로세스가 같은 메모리를 복사 없이 함께 보는 방법(POSIX 공유 메모리)과, 함께 쓰는 데이터를 망가뜨리지 않도록 순서를 맞추는 방법(세마포어, 뮤텍스, 조건 변수)을 예제 일곱 개로 확인합니다. 각 부는 설명 → 예제 → 코드 → 실행 → 정리 순서로 진행합니다.</p>
+
+<h2>오늘의 지도와 예제 일곱 개</h2>
+
+<p>수업은 네 부로 나뉩니다. 1부는 이름 있는 메모리를 만들어 함께 보는 POSIX 공유 메모리, 2부는 한 번에 하나만 들어가게 지키는 세마포어, 3부는 둘을 합쳐 큐를 직접 만드는 생산자–소비자, 4부는 같은 문제를 스레드에서 푸는 뮤텍스 · 조건 변수 · 세마포어입니다. 본론에 들어가기 전에 입문 예제 shmhello로 공유 메모리가 무엇인지부터 봅니다.</p>
+
+<p>예제 이름은 줄임말로 읽으면 됩니다. <code>shm</code>은 shared memory, <code>sem</code>은 semaphore, <code>th</code>는 thread, <code>ring</code>은 ring buffer(원형 버퍼)입니다.</p>
+
+<table>
+<thead>
+<tr><th>예제</th><th>무엇을 실행하나</th><th>왜 실행하나 — 확인하려는 것</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="shmhello.html">shmhello</a> (입문)</td><td><code>write</code>로 글을 써 두고 끝낸다. 따로 실행한 <code>read</code>가 그 글을 읽는다.</td><td>공유 메모리가 무엇인지 가장 작은 코드로 본다. 부모–자식이 아니어도 이름 하나로 만나는 것을 확인한다.</td></tr>
+<tr><td><a href="shmrace.html">shmrace</a> (1부)</td><td>네 프로세스가 같은 값을 잠금 없이 100만 번씩 올린다.</td><td>잠금이 왜 필요한지를 설명보다 먼저 겪는다. 혼자면 맞고 넷이면 틀리는 코드를 눈으로 본다.</td></tr>
+<tr><td><a href="semcount.html">semcount</a> (2부)</td><td>같은 일을 세마포어로 잠그고 한다. 잠근 프로세스를 죽여 본다.</td><td>wait · post 두 줄의 효과와 그 값(시간)을 숫자로 잰다. 잠금이 새로 만드는 문제(풀리지 않음)를 본다.</td></tr>
+<tr><td><a href="ringbuf.html">ringbuf</a> (3부)</td><td>8칸 버퍼에 넣는 프로세스와 꺼내는 프로세스를 따로 돌린다.</td><td>공유 + 동기화로 큐를 직접 만든다. 1차시의 메시지 큐가 커널 안에서 하던 일을 이해한다.</td></tr>
+<tr><td><a href="thcount.html">thcount</a> (4부)</td><td>스레드 넷이 전역 변수를 올린다: 잠금 없이 · 뮤텍스 · 세마포어.</td><td>스레드에서도 같은 문제가 생기는 것을 본다. 뮤텍스와 세마포어를 같은 일로 비교한다.</td></tr>
+<tr><td><a href="thqueue.html">thqueue</a> (4부)</td><td>생산자 · 소비자 스레드가 8칸 버퍼를 함께 쓴다.</td><td>조건 변수로 "빌 때까지 · 찰 때까지" 기다린다. ringbuf와 같은 문제를 다른 도구로 풀어 비교한다.</td></tr>
+<tr><td><a href="thlimit.html">thlimit</a> (4부)</td><td>스레드 여섯 개 가운데 한 번에 둘만 들어가게 한다.</td><td>세마포어를 잠금이 아니라 "자리의 수"로 쓴다. 뮤텍스로는 안 되는 일을 본다.</td></tr>
+</tbody>
+</table>
+
+<h2>미리 보기: 오늘 쓰는 기술 여섯 가지</h2>
+
+<p>본론에 앞서 오늘 등장하는 기술 여섯 가지를 한 번씩 훑어봅니다. 자세한 설명은 각 부에서 다시 하므로, 여기서는 각각이 무엇이고 어느 예제에서 쓰이는지만 잡아 두면 됩니다.</p>
+
+<h3>① 공유 메모리: 같은 메모리를 함께 본다</h3>
+
+<p>프로세스는 원래 서로의 메모리를 볼 수 없습니다. 공유 메모리는 그 벽에 낸 창입니다. 같은 물리 메모리를 여러 프로세스의 주소 공간에 붙여서, A가 쓰면 B에게 바로 보이게 합니다. A가 붙인 주소 p와 B가 붙인 주소 q는 서로 달라도 됩니다. 쓰는 순서는 <code>shm_open</code>(이름으로 연다) → <code>ftruncate</code>(크기를 정한다) → <code>mmap</code>(붙인다) → 포인터로 읽고 쓴다 → <code>shm_unlink</code>(이름을 지운다)입니다.</p>
+
+<ul>
+<li><strong>복사가 없습니다.</strong> 파이프와 메시지 큐는 커널이 데이터를 복사하지만, 공유 메모리에서는 바로 봅니다.</li>
+<li><strong>이름으로 만납니다.</strong> 부모–자식 사이가 아니어도 같은 이름을 열면 같은 메모리입니다.</li>
+<li><strong>지울 때까지 남습니다.</strong> 프로세스가 끝나도 <code>shm_unlink</code> 전까지 <code>/dev/shm</code>에 남습니다.</li>
+</ul>
+
+<p>커널이 끼어들지 않아 가장 빠르지만, 그 대신 순서는 프로그램이 직접 맞춰야 합니다.</p>
+
+<h3>② 경쟁 조건: 값이 사라지는 이유</h3>
+
+<p>경쟁 조건은 도구가 아니라 풀어야 할 문제입니다. <code>count++</code>는 읽고 · 더하고 · 쓰는 세 단계이고, 그 사이에 다른 흐름이 끼어들 수 있습니다. count가 5일 때 흐름 A가 6을 쓰기 전에 흐름 B가 5를 읽으면, 둘 다 6을 써서 7이어야 할 값이 6이 됩니다. 한 번이 사라진 것입니다. 결과가 실행 순서에 달려 있어 실행할 때마다 다른 값이 나오는데, 이것이 경쟁 조건입니다. 혼자 실행하면 나타나지 않고, 프로세스에서도 스레드에서도 똑같이 생깁니다.</p>
+
+<p>답은 상호 배제입니다. 한 번에 하나만 실행해야 하는 구간을 <strong>임계 구역</strong>이라 하고(여기서는 <code>count++</code> 한 줄), 임계 구역에 하나만 들어가게 하는 것을 <strong>상호 배제</strong>라 합니다. 그 도구가 세마포어와 뮤텍스입니다.</p>
+
+<h3>③ 세마포어: 정수 하나로 때를 맞춘다</h3>
+
+<p>세마포어는 정수 하나와 두 연산입니다. <code>sem_wait</code>는 값이 0보다 크면 1을 빼고 지나가고, 값이 0이면 올라갈 때까지 잠듭니다. <code>sem_post</code>는 값에 1을 더하고, 잠든 쪽이 있으면 하나를 깨웁니다. "확인하고 빼기"는 쪼개지지 않아서 그 사이에는 아무도 끼어들지 못합니다.</p>
+
+<p>처음 값이 1인 세마포어로 두 흐름이 임계 구역에 들어가는 과정은 다음과 같습니다.</p>
+
+<table>
+<thead>
+<tr><th>차례</th><th>일어난 일</th><th>값</th><th>결과</th></tr>
+</thead>
+<tbody>
+<tr><td>1</td><td>A가 <code>sem_wait</code></td><td>1 → 0</td><td>A가 지나간다 — 임계 구역 안</td></tr>
+<tr><td>2</td><td>B가 <code>sem_wait</code></td><td>0</td><td>B는 잠든다</td></tr>
+<tr><td>3</td><td>A가 <code>sem_post</code></td><td>0 → 1</td><td>임계 구역을 나오며 B를 깨운다</td></tr>
+<tr><td>4</td><td>B가 깨어난다</td><td>1 → 0</td><td>B가 지나간다</td></tr>
+</tbody>
+</table>
+
+<p>처음 값이 쓰임을 정합니다. 처음 값이 1이면 한 번에 하나만 들어가는 잠금(이진 세마포어)이고, 임계 구역을 wait와 post로 감쌉니다(예제 semcount). 처음 값이 N이면 한 번에 N개까지 들어가는 자리의 수(계수 세마포어)입니다(예제 thlimit). 다만 값을 치릅니다. 잠그면 느려지고(실측으로 잠금 없이 0.006초이던 것이 세마포어로 0.407초), 잠근 채 죽으면 아무도 들어가지 못합니다.</p>
+
+<h3>④ 생산자–소비자와 원형 버퍼</h3>
+
+<p>넣는 쪽(생산자)과 꺼내는 쪽(소비자)이 고정 크기 버퍼를 함께 씁니다. 규칙은 세 가지입니다. 가득 차면 생산자가 기다리고, 비면 소비자가 기다리고, 버퍼를 고칠 때는 하나만 고칩니다. 버퍼는 8칸 배열이고 <code>head</code>는 다음에 꺼낼 자리, <code>tail</code>은 다음에 넣을 자리입니다. 7번 칸 다음은 0번 칸이라서 <code>tail = (tail + 1) % 8</code>로 옮기며, 그래서 원형(ring)이라 부릅니다.</p>
+
+<p>프로세스 사이에서는 세마포어 셋으로 지킵니다. 빈 칸의 수(처음 8, 0이면 가득 찬 것이므로 생산자가 잠든다), 든 칸의 수(처음 0, 0이면 빈 것이므로 소비자가 잠든다), 그리고 head · tail · 칸을 고치는 동안 하나만 들어가게 하는 잠금(처음 1)입니다(예제 ringbuf). 스레드 사이에서는 뮤텍스와 조건 변수 둘로 합니다(예제 thqueue). 공유(버퍼)에 동기화(세마포어 셋)를 더하면 1차시의 메시지 큐가 커널 안에서 하던 일이 됩니다.</p>
+
+<h3>⑤ 스레드와 뮤텍스: 잠근 쪽이 푼다</h3>
+
+<p>스레드는 한 프로세스 안의 실행 흐름이고, 전역 변수와 힙을 처음부터 함께 씁니다. 그래서 경쟁 조건이 기본으로 따라옵니다. 뮤텍스는 스레드의 잠금 전용 도구로, lock과 unlock 사이는 한 스레드만 실행합니다.</p>
+
+<pre><code>pthread_mutex_lock(&amp;m);    // 잠근다
+count++;                   // 임계 구역
+pthread_mutex_unlock(&amp;m);  // 푼다</code></pre>
+
+<table>
+<thead>
+<tr><th></th><th>뮤텍스</th><th>세마포어 (값 1)</th></tr>
+</thead>
+<tbody>
+<tr><td>푸는 쪽</td><td>잠근 스레드만</td><td>누구나 post 한다</td></tr>
+<tr><td>쓰임</td><td>잠금 전용</td><td>잠금 · 수 세기</td></tr>
+<tr><td>기다리기</td><td>조건 변수와 짝</td><td>값이 0이면 잠든다</td></tr>
+</tbody>
+</table>
+
+<p>정리하면 프로세스 사이에서는 공유 메모리 + 세마포어, 스레드 사이에서는 전역 변수 + 뮤텍스를 씁니다. 예제 thcount의 실측으로는 뮤텍스가 0.335초, 세마포어가 0.441초였습니다.</p>
+
+<h3>⑥ 조건 변수: 될 때까지 기다린다</h3>
+
+<p>뮤텍스는 "한 번에 하나"만 지킬 뿐, "값이 들어올 때까지" 같은 기다림은 맡지 못합니다. 조건 변수는 어떤 조건이 될 때까지 뮤텍스를 풀고 잠들게 해 줍니다.</p>
+
+<pre><code>pthread_mutex_lock(&amp;lock);
+while (used == 0)            // 비었으면
+    pthread_cond_wait(&amp;not_empty, &amp;lock);
+… 하나 꺼낸다 …
+pthread_mutex_unlock(&amp;lock);</code></pre>
+
+<p><code>pthread_cond_wait</code> 한 번이 하는 일은 세 가지입니다. ① 뮤텍스를 풀고 잠든다, ② signal을 받으면 깨어난다, ③ 뮤텍스를 다시 잠그고 돌아온다. 깨우는 쪽은 <code>pthread_cond_signal</code>로 기다리는 스레드 하나를 깨우거나, <code>pthread_cond_broadcast</code>로 모두 깨웁니다. broadcast는 끝났음을 알릴 때 씁니다.</p>
+
+<p>두 가지를 기억해야 합니다. 깨어났다고 조건이 참인 것은 아니므로 <code>if</code>가 아니라 <code>while</code>로 다시 확인합니다. 그리고 signal은 기억되지 않아서, 기다리는 스레드가 없으면 그냥 사라집니다.</p>
+
+<h3>어느 도구를 쓰나: 하려는 일에서 고른다</h3>
+
+<table>
+<thead>
+<tr><th>하려는 일</th><th>도구</th><th>오늘의 예제</th></tr>
+</thead>
+<tbody>
+<tr><td>프로세스끼리 복사 없이 데이터를 함께 본다</td><td>공유 메모리</td><td>shmhello · shmrace</td></tr>
+<tr><td>한 번에 하나만 들어간다 — 스레드 사이</td><td>뮤텍스</td><td>thcount mutex</td></tr>
+<tr><td>한 번에 하나만 들어간다 — 프로세스 사이</td><td>세마포어 (처음 값 1)</td><td>semcount</td></tr>
+<tr><td>한 번에 N개까지 들어간다</td><td>계수 세마포어 (처음 값 N)</td><td>thlimit</td></tr>
+<tr><td>어떤 조건이 될 때까지 기다린다</td><td>조건 변수 + 뮤텍스, 또는 세마포어</td><td>thqueue (조건 변수) · ringbuf (세마포어)</td></tr>
+</tbody>
+</table>
+
+<p>공유 메모리는 "함께 보기"의 도구이고 나머지 셋은 "때 맞추기"의 도구입니다. 둘은 늘 짝으로 쓰입니다. 고르는 순서는 ① 무엇을 함께 쓰나 → ② 한 번에 몇이 들어가도 되나 → ③ 무엇을 기다려야 하나 입니다.</p>
+
+<h2>본론에 앞서: 왜 공유 메모리인가</h2>
+
+<h3>1차시에서 남겨 둔 두 자리</h3>
+
+<p>1차시에서 프로세스가 함께 일하려면 세 가지가 필요하다고 했습니다. ① 건넨다(전달), ② 함께 본다(공유), ③ 때를 맞춘다(동기화)입니다. 1차시에 배운 메시지 큐와 파이프는 ①에 해당하고, 커널이 데이터를 복사하면서 순서와 기다림까지 맡아 줬습니다. 오늘 1부의 공유 메모리가 ②, 2부의 세마포어가 ③입니다.</p>
+
+<p>공유에서는 복사 없이 같은 메모리를 보지만 커널이 끼어들지 않습니다. 그래서 순서와 기다림을 프로그램이 직접 맞춰야 하고, 세마포어가 그 도구입니다. 11주차의 실험을 떠올리면 됩니다. 공유 매핑에서 넷이 동시에 100만 번씩 <code>++</code>를 했더니 기대한 400만이 아니라 130만~230만이 나왔습니다. "공유는 빠르지만 순서는 직접 맞춰야 한다"는 것이 그때의 결론이었고, 오늘 그 방법을 배웁니다. 그리고 ②와 ③을 합치면 ①을 직접 만들 수 있는데, 그것이 3부의 생산자–소비자입니다.</p>
+
+<h3>전달로는 아쉬운 때</h3>
+
+<p>1차시의 "무엇을 고를까" 질문 가운데 "데이터가 크거나 여럿이 함께 고치는가"에 해당하면 공유 메모리 + 세마포어를 고릅니다. 상황별로 비교하면 다음과 같습니다.</p>
+
+<table>
+<thead>
+<tr><th>상황</th><th>메시지 큐(전달)로 하면</th><th>공유 메모리로 하면</th></tr>
+</thead>
+<tbody>
+<tr><td>큰 데이터 (예: 영상 한 장 8 MB)</td><td>8192바이트 한도라서 천 번으로 쪼갠다. 보낼 때와 받을 때 두 번 복사한다.</td><td>한 번 써 두면 모두가 본다. 복사가 없다.</td></tr>
+<tr><td>여럿이 보는 상태 (지도 · 캐시 · 통계)</td><td>바뀔 때마다 모두에게 보낸다. 각자의 사본이 어긋날 수 있다.</td><td>한 곳만 고치면 모두에게 보인다. 사본이 하나뿐이다.</td></tr>
+<tr><td>아주 잦은 접근</td><td>읽고 쓸 때마다 시스템 호출</td><td>붙인 뒤에는 그냥 메모리 접근</td></tr>
+<tr><td>대가</td><td>커널이 순서와 기다림을 맡는다. 쓰기 쉽다.</td><td>순서를 직접 맞춰야 한다. 틀려도 대부분은 동작해서 버그가 숨는다.</td></tr>
+</tbody>
+</table>
+
+<p>공유 메모리는 가장 빠른 IPC이면서 가장 틀리기 쉬운 IPC입니다.</p>
+
+<h3>OS 안에서 공유 메모리가 놓이는 자리</h3>
+
+<p>11주차에 본 "OS 안에서 mmap이 놓이는 자리"와 같은 구조입니다. 다른 점은 디스크 파일 대신 이름 있는 메모리 객체를 쓴다는 것입니다. 커널에는 물리 페이지 하나(예: "hello shm"이 든 메모리 파일 <code>/dev/shm/w13_hello</code>)가 있고, 프로세스 A의 페이지 테이블과 B의 페이지 테이블이 그 같은 물리 페이지를 가리킵니다. A가 포인터 p로 <code>p[0] = 'h'</code>를 쓰면 B는 포인터 q로 <code>q[0]</code>에서 'h'를 읽습니다. 같은 물리 페이지를 두 주소 공간에 붙인 것이므로 복사는 한 번도 일어나지 않습니다.</p>
+
+<ul>
+<li><strong>주소는 달라도 됩니다.</strong> A와 B가 붙인 주소는 서로 다르지만(예: <code>0xffff9c6c9000</code>과 <code>0xffff8efb2000</code>) 가리키는 곳이 같습니다.</li>
+<li><strong>디스크가 아닙니다.</strong> <code>/dev/shm</code>은 메모리에만 있는 파일 시스템이라 재부팅하면 사라집니다.</li>
+<li><strong>한 번 붙이면 끝입니다.</strong> 그 뒤의 읽기 · 쓰기에는 시스템 호출이 없습니다. 커널은 그 접근을 모릅니다.</li>
+</ul>
+
+<h3>입문 예제 shmhello: 끝난 프로세스가 남긴 글</h3>
+
+<p><a href="shmhello.html">shmhello</a>는 한 프로세스가 써 둔 글을 나중에 온 다른 프로세스가 읽는 예제입니다. 서로 모르는 두 프로세스가 이름 하나로 같은 메모리를 보는지 직접 확인하려고 실행합니다. 사용법은 <code>./shmhello write TEXT | read | rm</code>이고, 명령마다 새 프로세스입니다.</p>
+
+<p>쓰는 쪽은 세 단계로 공유 메모리를 만듭니다.</p>
+
+<pre><code>int fd = shm_open(NAME, O_CREAT | O_RDWR, 0600);   /* ① 이름으로 연다 */
+if (ftruncate(fd, SIZE) == -1) { perror("ftruncate"); return 1; }  /* ② */
+char *p = mmap(NULL, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+close(fd);                      /* 붙인 뒤에는 fd가 필요 없다 */
+snprintf(p, SIZE, "%s", argv[2]);       /* 그냥 메모리에 쓴다 */</code></pre>
+
+<p><code>shm_open</code>은 fd를 돌려줍니다. 새로 만든 객체의 크기는 0이라서 <code>ftruncate</code>로 늘려야 합니다. <code>mmap</code>에 <code>MAP_SHARED</code>를 주어 붙이고 나면 fd는 닫아도 되고, 쓰기는 평범한 <code>snprintf</code>입니다. 읽는 쪽은 같은 이름을 읽기용으로 열어 붙이기만 합니다.</p>
+
+<pre><code>int fd = shm_open(NAME, O_RDONLY, 0);
+char *p = mmap(NULL, SIZE, PROT_READ, MAP_SHARED, fd, 0);</code></pre>
+
+<p>읽는 쪽은 <code>ftruncate</code>를 하지 않고, 읽기도 그냥 포인터로 합니다. <code>rm</code>은 <code>shm_unlink(NAME)</code>으로 이름을 지웁니다.</p>
+
+<p>실행에서 확인할 것은 세 가지입니다.</p>
+
+<ul>
+<li><strong>쓴 프로세스는 이미 끝났습니다.</strong> 글을 쓴 프로세스는 이미 없는데도 글은 커널의 객체에 남아 있어서, 나중에 실행한 프로세스가 읽습니다.</li>
+<li><strong>주소가 매번 다릅니다.</strong> 프로세스마다 출력하는 주소가 다릅니다. 같은 메모리를 다른 주소로 보는 것입니다.</li>
+<li><strong>파일로도 보입니다.</strong> 객체는 <code>/dev/shm/w13_hello</code>라는 파일로 보이고 <code>head</code> · <code>cat</code> · <code>rm</code>이 됩니다. 크기는 <code>ftruncate</code>한 값입니다.</li>
+</ul>
+
+<h2>1부 POSIX 공유 메모리</h2>
+
+<p>이름으로 열고, 크기를 정하고, 주소 공간에 붙입니다. 그 안에 구조체를 놓는 법과 수명을 보고, 잠금 없이 여럿이 쓰면 어떻게 되는지 확인합니다.</p>
+
+<h3>만들고 쓰고 지우는 순서</h3>
+
+<p>전체 흐름은 <code>shm_open</code>(이름 → fd) → <code>ftruncate</code>(크기를 정한다) → <code>mmap</code>(주소 공간에 붙인다) → <code>p[i] = …</code>(그냥 읽고 쓴다) → <code>munmap</code>(뗀다) → <code>shm_unlink</code>(이름을 지운다)입니다. 헤더는 <code>&lt;sys/mman.h&gt;</code>와 <code>&lt;fcntl.h&gt;</code>이고, glibc 2.34 이전에는 <code>-lrt</code>로 링크해야 합니다. <code>ftruncate</code>는 만드는 쪽만 하고, 붙이는 쪽은 <code>shm_open</code>과 <code>mmap</code>만 합니다.</p>
+
+<table>
+<thead>
+<tr><th>함수</th><th>하는 일</th><th>알아 둘 것</th></tr>
+</thead>
+<tbody>
+<tr><td><code>shm_open(name, flags, mode)</code></td><td>이름 있는 메모리 객체를 열거나 만든다</td><td><code>open</code>과 같은 플래그 · 이름은 "/"로 시작</td></tr>
+<tr><td><code>ftruncate(fd, size)</code></td><td>객체의 크기를 정한다</td><td>새 객체는 0바이트 — 빼먹으면 SIGBUS</td></tr>
+<tr><td><code>mmap(…, MAP_SHARED, fd, 0)</code></td><td>내 주소 공간에 붙이고 주소를 받는다</td><td>붙인 뒤 <code>close(fd)</code>를 해도 된다</td></tr>
+<tr><td><code>munmap(p, size)</code></td><td>내 주소 공간에서 뗀다</td><td>프로세스가 끝나면 저절로 떼어진다</td></tr>
+<tr><td><code>shm_unlink(name)</code></td><td>이름을 지운다</td><td>모두 뗀 뒤에 메모리가 실제로 풀린다</td></tr>
+</tbody>
+</table>
+
+<h3>11주차의 mmap과 나란히</h3>
+
+<p>11주차에 본 두 가지 공유 매핑과 비교하면 POSIX 공유 메모리의 자리가 분명해집니다. <code>shm_open</code>은 "이름이 있는 익명 공유 매핑"이라고 보면 됩니다.</p>
+
+<table>
+<thead>
+<tr><th></th><th>파일을 공유 매핑</th><th>익명 공유 매핑</th><th>POSIX 공유 메모리</th></tr>
+</thead>
+<tbody>
+<tr><td>여는 법</td><td><code>open</code> + <code>mmap(MAP_SHARED)</code></td><td><code>mmap(MAP_SHARED | MAP_ANONYMOUS)</code></td><td><code>shm_open</code> + <code>mmap(MAP_SHARED)</code></td></tr>
+<tr><td>이름</td><td>파일 경로</td><td>없다</td><td>"/이름"</td></tr>
+<tr><td>누가 함께 쓰나</td><td>경로를 아는 누구나</td><td>fork로 이어진 사이만</td><td>이름을 아는 누구나</td></tr>
+<tr><td>데이터가 있는 곳</td><td>디스크 파일 (+ 페이지 캐시)</td><td>메모리만</td><td>메모리만 (<code>/dev/shm</code>)</td></tr>
+<tr><td>수명</td><td>파일을 지울 때까지</td><td>마지막 프로세스가 끝날 때까지</td><td><code>shm_unlink</code>나 재부팅까지</td></tr>
+<tr><td>알맞은 때</td><td>내용을 남겨야 할 때</td><td>부모와 자식 사이</td><td>서로 모르는 프로세스 사이</td></tr>
+</tbody>
+</table>
+
+<h3>구조체를 올린다 — 포인터는 올리지 않는다</h3>
+
+<p>공유 메모리를 쓰는 데는 캐스팅 한 번이면 됩니다. <code>mmap</code>이 준 주소를 구조체 포인터로 받으면 그 뒤는 평범한 C입니다.</p>
+
+<pre><code>struct shared {
+    sem_t lock;
+    volatile long count;
+};
+struct shared *s = mmap(...);
+s-&gt;count++;</code></pre>
+
+<p>반대로 다음처럼 포인터를 넣으면 안 됩니다.</p>
+
+<pre><code>struct bad {
+    char *name;   /* A의 주소 */
+    struct bad *next;
+};
+/* B에게 그 주소는
+   전혀 다른 곳이다 */</code></pre>
+
+<p>붙인 주소가 프로세스마다 다르기 때문에 A가 넣은 포인터 값은 B에게 뜻이 없습니다. 게다가 <code>malloc</code>으로 받은 메모리는 아예 공유되지 않습니다. 규칙은 "그 프로세스 안에서만 뜻이 있는 값은 공유 메모리에 넣지 않는다"입니다.</p>
+
+<ul>
+<li><strong>넣어도 되는 것:</strong> 정수 · 실수 · 문자 배열 · 그것들의 구조체 · <code>sem_t</code></li>
+<li><strong>넣으면 안 되는 것:</strong> 포인터, <code>malloc</code>으로 받은 주소, <code>FILE *</code>, fd 번호</li>
+<li><strong>가리켜야 하면:</strong> 시작에서의 거리(오프셋)나 배열의 인덱스를 씁니다. 3부의 <code>head</code> · <code>tail</code>이 그 예입니다.</li>
+</ul>
+
+<p>양쪽 프로그램은 같은 헤더(<code>counter.h</code> · <code>ring.h</code>)를 포함해 구조체의 모양을 맞춥니다. 1차시의 <code>proto.h</code>와 같은 역할입니다.</p>
+
+<h3>수명: 무엇을 하면 무엇이 사라지나</h3>
+
+<p>IPC 객체의 수명은 세 가지로 나뉩니다. 파이프와 익명 공유 매핑은 <strong>프로세스 수명</strong>이라서 쓰던 프로세스가 모두 끝나면 사라집니다. 공유 메모리는 <strong>커널 수명</strong>(kernel persistence)입니다. 객체의 주인이 프로세스가 아니라 커널이어서, 만든 프로세스가 끝나도 커널이 갖고 있고 누가 지우거나 재부팅할 때까지 남습니다. 디스크의 파일은 <strong>파일 시스템 수명</strong>이라 재부팅해도 남습니다.</p>
+
+<table>
+<thead>
+<tr><th>동작</th><th>내 주소 공간의 매핑</th><th>객체와 그 내용</th><th>이름 (<code>/dev/shm/…</code>)</th></tr>
+</thead>
+<tbody>
+<tr><td><code>close(fd)</code></td><td>그대로</td><td>그대로</td><td>그대로</td></tr>
+<tr><td><code>munmap</code></td><td>사라진다</td><td>그대로</td><td>그대로</td></tr>
+<tr><td>프로세스 종료</td><td>사라진다</td><td>그대로 — 다음 프로세스가 본다</td><td>그대로</td></tr>
+<tr><td><code>shm_unlink</code></td><td>그대로 — 계속 쓸 수 있다</td><td>모두 뗄 때까지 남는다</td><td>사라진다</td></tr>
+<tr><td>재부팅</td><td>—</td><td>사라진다</td><td>사라진다</td></tr>
+</tbody>
+</table>
+
+<p>프로세스가 끝나도 내용이 남는다는 것은 좋은 점이자 함정입니다. 지난 실행의 값이 그대로 남아 있을 수 있기 때문입니다. 또 지우지 않으면 <code>/dev/shm</code>에 남아 메모리를 차지합니다. <code>df -h /dev/shm</code>으로 확인할 수 있습니다.</p>
+
+<h3>count++는 한 동작이 아니다</h3>
+
+<p>aarch64에서 <code>s-&gt;count++</code>는 <code>ldr</code>(읽기) · <code>add</code>(더하기) · <code>str</code>(쓰기) 세 명령입니다. ① 레지스터로 count를 읽고, ② 레지스터에 1을 더하고, ③ 레지스터 값을 count에 씁니다. 단계 사이에 다른 프로세스가 낄 수 있고, 코어가 여러 개면 정말로 동시에 실행됩니다.</p>
+
+<table>
+<thead>
+<tr><th>시각</th><th>프로세스 A</th><th>프로세스 B</th><th>count</th></tr>
+</thead>
+<tbody>
+<tr><td>1</td><td>① 5를 읽는다</td><td></td><td>5</td></tr>
+<tr><td>2</td><td></td><td>① 5를 읽는다</td><td>5</td></tr>
+<tr><td>3</td><td>② ③ 6을 쓴다</td><td></td><td>6</td></tr>
+<tr><td>4</td><td></td><td>② ③ 6을 쓴다</td><td>6</td></tr>
+</tbody>
+</table>
+
+<p>두 번 올렸는데 6입니다. B는 A가 고치기 전의 값으로 계산했습니다. 둘 다 5를 읽으면 둘 다 6을 쓰고, 갱신 한 번이 없어집니다. 결과가 실행 순서에 달려 있어 매번 다른 값이 나오는 것, 이것이 경쟁 조건입니다. 한 프로세스만 돌리면 절대 나타나지 않기 때문에, 시험해 보고 "잘 된다"고 믿기 쉽다는 점이 위험합니다.</p>
+
+<h3>예제 shmrace: 혼자면 맞고 넷이면 틀린다</h3>
+
+<p><a href="shmrace.html">shmrace</a>는 공유 메모리의 값을 여러 프로세스가 잠금 없이 올리는 예제입니다. 잠금이 왜 필요한지 듣기 전에, 없으면 어떻게 되는지를 먼저 겪어 보려는 것입니다. 사용법은 <code>./shmrace init | add N | show | rm</code>입니다.</p>
+
+<p>공용 헤더 <code>counter.h</code>에는 공유 메모리의 맨 앞에 놓이는 구조체와, 이름으로 열어 붙이는 함수 <code>attach</code>가 있습니다.</p>
+
+<pre><code>struct shared {                 /* 공유 메모리의 맨 앞에 이 구조체가 놓인다 */
+    sem_t lock;                 /* 2부에서 쓴다: 이진 세마포어 (1 = 열림) */
+    volatile long count;        /* 여러 프로세스가 함께 올리는 값 */
+};</code></pre>
+
+<p><code>attach(create)</code>는 만들 때는 <code>O_CREAT | O_EXCL | O_RDWR</code>로 열고 <code>ftruncate(fd, sizeof(struct shared))</code>로 크기를 정하며, 붙이기만 할 때는 <code>O_RDWR</code>로 <code>shm_open</code>만 합니다. 그다음 <code>mmap</code>의 결과를 <code>struct shared *</code>로 받고 fd는 바로 닫습니다. 매핑은 fd를 닫아도 남기 때문입니다.</p>
+
+<p><code>init</code>은 공유 메모리를 만들고 세마포어를 1로(<code>sem_init(&amp;s-&gt;lock, 1, 1)</code>), 값을 0으로 둡니다. <code>add</code>는 붙여서 N번 올리는데, 잠금은 없습니다.</p>
+
+<pre><code>struct shared *s = attach(0);
+long n = atol(argv[2]);
+for (long i = 0; i &lt; n; i++)
+    s-&gt;count++;                 /* 읽고 · 더하고 · 쓴다: 세 단계 */</code></pre>
+
+<p><code>show</code>는 붙여서 값을 읽고, <code>rm</code>은 <code>shm_unlink</code>로 이름을 지웁니다.</p>
+
+<p>10코어 기계에서 실행한 결과는 다음과 같았습니다.</p>
+
+<ul>
+<li><strong>혼자면 정확합니다.</strong> 100만 번 올리면 100만입니다. 코드에는 잘못이 없어 보입니다.</li>
+<li><strong>넷이면 사라집니다.</strong> 네 프로세스가 400만을 더했는데 196만만 늘었습니다. 절반이 없어졌습니다.</li>
+<li><strong>매번 다릅니다.</strong> 둘째 실행에서는 209만이 늘었습니다. 같은 프로그램, 같은 입력인데 결과가 다릅니다.</li>
+</ul>
+
+<h3>1부 정리: 빠르지만 지켜 주는 것이 없다</h3>
+
+<ul>
+<li><strong>얻은 것:</strong> 복사가 없습니다. 붙인 뒤에는 시스템 호출이 없습니다. 큰 데이터도 그대로 둡니다.</li>
+<li><strong>조심할 것:</strong> 포인터 · fd는 넣지 않습니다. 프로세스가 끝나도 내용이 남습니다. 만든 쪽이 지웁니다.</li>
+<li><strong>남은 문제:</strong> 동시에 고치면 값이 사라집니다. 커널은 끼어들지 않으므로 순서를 직접 맞춰야 합니다.</li>
+</ul>
+
+<p>메시지 큐는 커널이 줄을 세워 줬지만, 공유 메모리에서는 줄을 우리가 세웁니다. 2부는 shmrace의 <code>s-&gt;count++</code> 한 줄을 지키는 법입니다.</p>
+
+<h2>2부 세마포어</h2>
+
+<p>한 번에 한 프로세스만 값을 고치게 지킵니다. 세마포어가 무엇인지, 어떻게 잠그고 푸는지, 그리고 잠금에 드는 값과 함정을 봅니다.</p>
+
+<h3>임계 구역: 한 번에 하나만</h3>
+
+<p><strong>임계 구역</strong>(critical section)은 함께 쓰는 데이터를 읽고 고치는 코드 구간입니다. 여기서는 <code>s-&gt;count++;</code>(읽고 · 더하고 · 쓴다)입니다. <strong>상호 배제</strong>(mutual exclusion)는 그 구간에 한 번에 한 프로세스만 들어가고 나머지는 기다리게 하는 것입니다. 운영체제 과목의 용어를 실제 함수로 만나는 셈입니다.</p>
+
+<p>문이 하나 달린 방으로 생각하면 됩니다. 들어갈 때는 비어 있으면 들어가서 문을 잠그고, 누가 있으면 잠들어 기다립니다. 나올 때는 문을 풀고, 기다리던 프로세스 하나를 깨웁니다. "세 단계 사이에 아무도 끼어들지 못하게" 하면 <code>count++</code>는 다시 한 동작처럼 됩니다.</p>
+
+<p>재우고 깨우는 일은 커널이 합니다. 기다리는 쪽은 CPU를 쓰지 않고 자다가 풀리면 깨어납니다. 그리고 임계 구역은 짧을수록 좋습니다.</p>
+
+<h3>세마포어: 정수 하나와 두 연산</h3>
+
+<p>세마포어는 Dijkstra(1965)의 P · V 연산에서 왔습니다. <code>sem_wait</code> = P = down = 잠근다, <code>sem_post</code> = V = up = 푼다 로 대응합니다.</p>
+
+<ul>
+<li><code>sem_wait(&amp;s)</code>: 값이 0보다 크면 1을 빼고 지나갑니다. 값이 0이면 잠듭니다.</li>
+<li><code>sem_post(&amp;s)</code>: 값에 1을 더하고, 잠든 프로세스 하나를 깨웁니다.</li>
+</ul>
+
+<p>값은 "남은 입장권"이라고 생각하면 됩니다. 0보다 크면 들어갈 수 있고 0이면 기다리며, 음수가 되지 않습니다. 중요한 것은 두 연산이 쪼개지지 않는다는 점입니다. 확인과 빼기 사이에 아무도 끼지 못하며, 이것을 커널과 CPU가 보장합니다. "확인하고 빼는" 두 걸음을 한 걸음으로 만들어 주는 것, 바로 우리가 <code>count++</code>에서 하지 못하던 일입니다.</p>
+
+<p>처음 값이 쓰임을 정합니다. 처음 값이 1이면 잠금(이진 세마포어)이어서 <code>wait … 임계 구역 … post</code>로 쓰고 한 번에 하나만 들어갑니다. 처음 값이 N이면 자리 수(계수 세마포어)입니다. 빈 칸이 N개인 버퍼처럼 N번까지는 기다리지 않습니다. 3부에서 둘 다 씁니다.</p>
+
+<h3>POSIX 세마포어의 함수</h3>
+
+<p>헤더는 <code>&lt;semaphore.h&gt;</code>이고 <code>-pthread</code>로 링크합니다. 이름 없는 세마포어를 프로세스 사이에서 쓰려면 <code>sem_t</code>가 공유 메모리 안에 있어야 합니다.</p>
+
+<table>
+<thead>
+<tr><th>함수</th><th>하는 일</th><th>알아 둘 것</th></tr>
+</thead>
+<tbody>
+<tr><td><code>sem_init(&amp;s, 1, 값)</code></td><td>세마포어를 처음 값으로 만든다</td><td>둘째 인자 1 = 프로세스 사이에서 쓴다</td></tr>
+<tr><td><code>sem_wait(&amp;s)</code></td><td>1을 뺀다. 0이면 잠든다</td><td>시그널을 받으면 -1, <code>EINTR</code></td></tr>
+<tr><td><code>sem_trywait(&amp;s)</code></td><td>기다리지 않는다</td><td>0이면 -1, <code>EAGAIN</code></td></tr>
+<tr><td><code>sem_timedwait(&amp;s, &amp;마감)</code></td><td>마감 시각까지만 기다린다</td><td>넘기면 -1, <code>ETIMEDOUT</code></td></tr>
+<tr><td><code>sem_post(&amp;s)</code></td><td>1을 더하고 하나를 깨운다</td><td>시그널 처리기 안에서 불러도 된다</td></tr>
+<tr><td><code>sem_getvalue(&amp;s, &amp;v)</code></td><td>지금 값을 본다</td><td>진단용 — 본 직후에 바뀔 수 있다</td></tr>
+<tr><td><code>sem_destroy(&amp;s)</code></td><td>세마포어를 끝낸다</td><td>기다리는 프로세스가 없을 때만</td></tr>
+</tbody>
+</table>
+
+<p>이름 있는 세마포어도 있습니다. <code>sem_open("/이름", O_CREAT, 0600, 값)</code> · <code>sem_close</code> · <code>sem_unlink</code>를 쓰며, <code>/dev/shm/sem.이름</code>으로 보입니다.</p>
+
+<h3>두 프로세스의 잠금 시간표</h3>
+
+<p>1부의 시간표와 비교해 봅니다. 이번에는 B가 A의 "읽기와 쓰기 사이"에 끼어들지 못하고 문 앞에서 잠들었습니다.</p>
+
+<table>
+<thead>
+<tr><th>시각</th><th>프로세스 A</th><th>프로세스 B</th><th>세마포어</th><th>count</th></tr>
+</thead>
+<tbody>
+<tr><td>1</td><td><code>sem_wait</code> — 1을 빼고 들어간다</td><td></td><td>0</td><td>5</td></tr>
+<tr><td>2</td><td>5를 읽는다</td><td><code>sem_wait</code> — 값이 0이다. 잠든다</td><td>0</td><td>5</td></tr>
+<tr><td>3</td><td>6을 쓴다</td><td>(자는 중)</td><td>0</td><td>6</td></tr>
+<tr><td>4</td><td><code>sem_post</code> — B를 깨운다</td><td>깨어나 들어간다</td><td>0</td><td>6</td></tr>
+<tr><td>5</td><td></td><td>6을 읽고 7을 쓴다</td><td>0</td><td>7</td></tr>
+<tr><td>6</td><td></td><td><code>sem_post</code> — 1을 더한다</td><td>1</td><td>7</td></tr>
+</tbody>
+</table>
+
+<p>두 번 올려서 7이 되었습니다. 임계 구역 안에는 언제나 하나뿐이었습니다.</p>
+
+<h3>예제 semcount: 정확해졌다, 그리고 느려졌다</h3>
+
+<p><a href="semcount.html">semcount</a>는 같은 값을 세마포어로 잠그고 올립니다. 같은 실험에 두 줄만 더해, 세마포어로 얻는 것과 치르는 값을 숫자로 재려는 예제입니다. 사용법은 <code>./semcount add N | hold SEC | try | value</code>이고, <code>shmrace init</code>으로 만든 공유 메모리를 그대로 씁니다.</p>
+
+<p><code>add</code>는 shmrace의 반복문에 wait와 post 두 줄을 더한 것입니다.</p>
+
+<pre><code>for (long i = 0; i &lt; n; i++) {
+    sem_wait(&amp;s-&gt;lock);         /* 1 → 0. 이미 0이면 여기서 잔다 */
+    s-&gt;count++;                 /* 임계 구역: 한 번에 한 프로세스만 */
+    sem_post(&amp;s-&gt;lock);         /* 0 → 1. 기다리던 프로세스를 깨운다 */
+}</code></pre>
+
+<p><code>hold</code>는 잠근 채로 주어진 초만큼 <code>sleep</code>한 뒤 풉니다. 이 사이에 프로세스가 죽으면 <code>sem_post</code>는 영영 실행되지 않고 세마포어는 잠긴 채로 남습니다. 이 상황을 만들어 보려고 둔 명령입니다.</p>
+
+<p><code>try</code>는 마감 시각까지만 기다립니다. 1차시의 <code>mq_timedreceive</code>와 같은 방식으로, 지금 시각에 2초를 더해 마감 시각을 만듭니다.</p>
+
+<pre><code>struct timespec until;
+clock_gettime(CLOCK_REALTIME, &amp;until);
+until.tv_sec += 2;              /* 마감 시각 = 지금 + 2초 */
+if (sem_timedwait(&amp;s-&gt;lock, &amp;until) == -1) {
+    perror("잠글 수 없다: sem_timedwait");
+    return 1;
+}</code></pre>
+
+<p>그때까지 잠그지 못하면 -1과 <code>ETIMEDOUT</code>으로 돌아오므로, 포기하고 알릴 수 있습니다. <code>value</code>는 <code>sem_getvalue</code>로 지금 값을 읽어 "열림"인지 "잠김"인지 보여 주는 진단용 명령입니다.</p>
+
+<p>첫 번째 실행에서는 네 프로세스가 100만 번씩 올려 정확히 400만이 되었습니다. 하나도 사라지지 않았고, 끝난 뒤 세마포어 값은 1(열림)이었습니다. 대신 시간이 0.006초에서 0.407초로 늘었습니다. 잠그면 약 70배 느린 것이고, 이것이 맞는 답의 값입니다. 여기서 "임계 구역은 짧게"라는 규칙이 나옵니다. 잠금 안에서 오래 걸리는 일을 하면 모두가 그만큼 기다립니다.</p>
+
+<p>두 번째 실행에서는 잠근 프로세스를 죽여 봅니다.</p>
+
+<ul>
+<li><strong>죽어도 풀리지 않습니다.</strong> 커널은 누가 잠갔는지 기억하지 않습니다. 값 0만 남습니다.</li>
+<li><strong>시간 제한이 없었다면</strong> 영원히 멈췄을 것입니다. <code>try</code> 대신 <code>add</code>였다면 끝나지 않고, 오류도 나지 않습니다.</li>
+<li><strong>고치는 길</strong>은 통째로 지우고 다시 만들거나, 죽을 때 풀리는 잠금을 쓰는 것입니다.</li>
+</ul>
+
+<h3>잠금의 값과 함정</h3>
+
+<p>1차시의 "프로세스가 여럿이면 실패도 여럿이다"의 공유 메모리판입니다.</p>
+
+<table>
+<thead>
+<tr><th>문제</th><th>어떻게 드러나나</th><th>대비</th></tr>
+</thead>
+<tbody>
+<tr><td>느려진다</td><td>0.006초 → 0.407초. 병렬로 돌던 것이 한 줄로 선다.</td><td>임계 구역을 짧게, 잠그는 횟수를 줄인다. 따로 세고 마지막에 합친다.</td></tr>
+<tr><td>post를 빠뜨린다</td><td>오류가 나서 중간에 return 하면 다음 wait가 영원히 잔다.</td><td>나가는 길을 하나로 모은다(<code>goto out</code>). 1차시 mqclient와 같은 방법이다.</td></tr>
+<tr><td>잠근 채 죽는다</td><td>값이 0으로 남는다. 오류 없이 모두 멈춘다.</td><td><code>sem_timedwait</code>, 지우고 다시 만들기, 죽으면 풀리는 잠금(<code>flock</code> · robust 뮤텍스)</td></tr>
+<tr><td>잠금 둘의 순서</td><td>A는 ㉮→㉯, B는 ㉯→㉮로 잠근다. 서로 기다리며 멈춘다(교착).</td><td>모든 프로세스가 같은 순서로 잠근다. 3부에서 다시 본다.</td></tr>
+<tr><td>wait를 빠뜨린다</td><td>대부분은 잘 돈다. 가끔 값이 틀린다(경쟁 조건).</td><td>공유 데이터에 손대는 모든 곳을 한 함수로 모은다.</td></tr>
+</tbody>
+</table>
+
+<p>잠금을 넣으면 "틀린 값"이 "멈춤"으로 바뀔 수 있습니다. 둘 다 막아야 합니다.</p>
+
+<h3>2부 정리: wait와 post 사이</h3>
+
+<pre><code>sem_wait(&amp;s-&gt;lock);    /* 잠근다 — 0이면 잔다 */
+s-&gt;count++;            /* 임계 구역 */
+sem_post(&amp;s-&gt;lock);    /* 푼다 — 하나를 깨운다 */</code></pre>
+
+<p>세마포어는 처음 값 1로 공유 메모리 안에 두고, <code>sem_init(&amp;s-&gt;lock, 1, 1)</code>의 둘째 인자 1로 프로세스 사이에서 쓴다고 알립니다.</p>
+
+<ul>
+<li><strong>얻은 것:</strong> 넷이 100만 번씩 올려 정확히 400만. 읽기–고치기–쓰기가 한 동작처럼 됩니다.</li>
+<li><strong>낸 값:</strong> 0.006초 → 0.407초. 임계 구역은 짧게, 잠그는 횟수는 적게 합니다.</li>
+<li><strong>남은 위험:</strong> 잠근 채 죽으면 풀리지 않습니다. 잠금이 둘이면 순서를 지킵니다. 기다림에는 시간 제한을 둡니다.</li>
+</ul>
+
+<p>세마포어는 "한 번에 하나"를 보장할 뿐, "누가 먼저"와 "죽으면 풀기"는 보장하지 않습니다.</p>
+
+<h2>3부 생산자–소비자</h2>
+
+<p>공유 메모리 위에 작은 큐를 놓고 세마포어 셋으로 지킵니다. 넣는 쪽과 꺼내는 쪽의 속도가 달라도 잃거나 겹치지 않게 만듭니다. 2부에서 "잠금"으로만 쓴 세마포어를 여기서는 "잠금"과 "자리 세기" 두 가지로 함께 씁니다.</p>
+
+<h3>문제: 넣는 쪽과 꺼내는 쪽의 속도가 다르다</h3>
+
+<p>생산자–소비자(유한 버퍼) 문제입니다. 생산자 여럿이 <code>put</code>으로 공유 메모리의 8칸 버퍼에 값을 넣고, 소비자가 <code>get</code>으로 꺼냅니다. 지켜야 할 것은 세 가지입니다.</p>
+
+<ol>
+<li><strong>가득 차면 생산자가 잠듭니다</strong>(빈 칸이 생길 때까지). 가득 찼는데 더 넣으면 아직 꺼내지 않은 값을 덮어쓰기 때문입니다.</li>
+<li><strong>비면 소비자가 잠듭니다</strong>(값이 들어올 때까지). 꺼낼 것이 없기 때문입니다.</li>
+<li><strong>고칠 때는 한 번에 한 프로세스만</strong> 고칩니다(상호 배제). 둘이 같은 칸에 쓰면 하나가 사라집니다. 1부의 문제 그대로입니다.</li>
+</ol>
+
+<p>①과 ②는 "자리의 수를 세는" 세마포어가, ③은 "잠금" 세마포어가 맡습니다. 12주차에 본 파이프의 "차면 write가 잠들고 비면 read가 잠든다"와 같은 규칙입니다.</p>
+
+<h3>원형 버퍼: 배열과 인덱스 둘</h3>
+
+<p>버퍼는 <code>struct ring</code> 안의 <code>long buf[8]</code>이고 공유 메모리에 놓입니다. <code>head</code>는 다음에 꺼낼 자리, <code>tail</code>은 다음에 넣을 자리입니다. 먼저 넣은 것이 먼저 나옵니다(FIFO).</p>
+
+<pre><code>넣기:    buf[tail] = v;    tail = (tail + 1) % 8;
+꺼내기:  v = buf[head];    head = (head + 1) % 8;</code></pre>
+
+<ul>
+<li><strong>포인터가 아니라 인덱스입니다.</strong> head와 tail은 정수입니다. 1부의 규칙대로 주소는 넣지 않습니다.</li>
+<li><strong>끝에서 처음으로 돌아갑니다.</strong> <code>% 8</code>로 돌아가므로 배열을 옮기지 않고 계속 씁니다.</li>
+<li><strong>넣기와 꺼내기는 다른 끝에서 일어납니다.</strong> 생산자는 tail만, 소비자는 head만 옮깁니다. 그래도 잠금은 필요합니다.</li>
+</ul>
+
+<p>이 네 줄이 임계 구역입니다. 두 프로세스가 동시에 tail을 읽으면 같은 칸에 쓰게 됩니다. 한편 든 칸의 수와 빈 칸의 수는 head · tail이 아니라 세마포어 값이 알려 줍니다.</p>
+
+<h3>세마포어 셋의 역할</h3>
+
+<ul>
+<li><code>slots</code> — 빈 칸의 수(처음 8). 0이면 가득 찬 것이므로 생산자가 잡니다.</li>
+<li><code>items</code> — 든 칸의 수(처음 0). 0이면 빈 것이므로 소비자가 잡니다.</li>
+<li><code>mutex</code> — 잠금(처음 1). 버퍼 · head · tail을 고칠 때 씁니다.</li>
+</ul>
+
+<pre><code>put (생산자)
+sem_wait(&amp;r-&gt;slots);    빈 칸을 하나 얻는다
+sem_wait(&amp;r-&gt;mutex);    잠근다
+buf[tail] = v; tail++   넣는다
+sem_post(&amp;r-&gt;mutex);    푼다
+sem_post(&amp;r-&gt;items);    든 칸 +1
+
+get (소비자)
+sem_wait(&amp;r-&gt;items);    든 칸을 하나 얻는다
+sem_wait(&amp;r-&gt;mutex);    잠근다
+v = buf[head]; head++   꺼낸다
+sem_post(&amp;r-&gt;mutex);    푼다
+sem_post(&amp;r-&gt;slots);    빈 칸 +1</code></pre>
+
+<p>생산자가 올린 <code>items</code>를 소비자가 내리고, 소비자가 올린 <code>slots</code>를 생산자가 내립니다. 내가 내린 세마포어를 상대가 올리는, 서로를 깨우는 구조입니다. 그래서 <code>slots + items = 8</code>이 언제나 유지됩니다.</p>
+
+<h3>잠그는 순서가 틀리면 멈춘다</h3>
+
+<p>옳은 순서는 자리를 먼저, 잠금을 나중에 얻는 것입니다.</p>
+
+<pre><code>sem_wait(&amp;r-&gt;slots);
+sem_wait(&amp;r-&gt;mutex);</code></pre>
+
+<p>버퍼가 가득 찼을 때 이 순서라면 ① 생산자는 slots가 0이라 잠들지만 mutex는 쥐지 않았고, ② 소비자가 mutex를 얻어 하나 꺼내고, ③ 소비자가 slots를 올리고, ④ 생산자가 깨어나 넣습니다.</p>
+
+<p>두 줄의 순서를 바꿔 잠금을 먼저 잡으면 이렇게 됩니다.</p>
+
+<pre><code>sem_wait(&amp;r-&gt;mutex);
+sem_wait(&amp;r-&gt;slots);</code></pre>
+
+<p>버퍼가 가득 찼을 때 ① 생산자가 mutex를 얻고, ② slots가 0이라 mutex를 쥔 채 잠들고, ③ 소비자는 mutex를 얻지 못해 잠들고, ④ slots를 올려 줄 프로세스가 없습니다. 교착입니다. 두 줄의 순서만 바꿨는데 버퍼가 가득 차는 순간 프로그램 전체가 멈춥니다.</p>
+
+<p>규칙은 "오래 기다릴 수 있는 것(자리)을 먼저, 짧게 쥐는 것(잠금)을 나중에", 그리고 "잠금을 쥔 채로 잠들지 않는다"입니다.</p>
+
+<h3>예제 ringbuf: 공유 메모리의 원형 버퍼와 세마포어 셋</h3>
+
+<p><a href="ringbuf.html">ringbuf</a>는 공유와 동기화를 합치면 1차시의 큐가 된다는 것을 직접 만들어 확인하는 예제입니다. 사용법은 <code>./ringbuf init | put START COUNT [MS] | get COUNT [MS] | stat | rm</code>이고, 공용 헤더는 <code>ring.h</code>입니다.</p>
+
+<pre><code>#define RING_NAME "/w13_ring"
+#define RING_SIZE 8
+
+struct ring {
+    sem_t slots;                /* 빈 칸의 수: 처음에 RING_SIZE */
+    sem_t items;                /* 든 칸의 수: 처음에 0 */
+    sem_t mutex;                /* head · tail · buf를 지키는 잠금: 처음에 1 */
+    int   head;                 /* 다음에 꺼낼 자리 */
+    int   tail;                 /* 다음에 넣을 자리 */
+    long  buf[RING_SIZE];
+};</code></pre>
+
+<p>세마포어 셋이 모두 공유 메모리 안에 있고, head와 tail은 포인터가 아니라 인덱스이며, 버퍼는 long 8개입니다. 구조체 전체가 168바이트입니다.</p>
+
+<p><code>put</code>과 <code>get</code>은 앞에서 본 틀 그대로입니다. <code>put</code>은 <code>slots</code>를 먼저 내리고(가득 찼으면 여기서 잡니다) 그다음에 <code>mutex</code>를 잠근 뒤, 값을 넣고 tail을 옮기고 풀고, <code>items</code>를 올려 소비자를 깨웁니다. <code>get</code>은 그 거울입니다. <code>items</code>를 내리고 잠그고 꺼내고 풀고 <code>slots</code>를 올립니다.</p>
+
+<p><code>init</code>은 세 세마포어의 처음 값을 정합니다. 둘째 인자 1은 프로세스 사이에서 공유한다는 뜻입니다.</p>
+
+<pre><code>sem_init(&amp;r-&gt;slots, 1, RING_SIZE);  /* 둘째 인자 1: 프로세스 사이 공유 */
+sem_init(&amp;r-&gt;items, 1, 0);
+sem_init(&amp;r-&gt;mutex, 1, 1);
+r-&gt;head = r-&gt;tail = 0;</code></pre>
+
+<p><code>put START COUNT [MS]</code>는 공유 메모리에 붙어서 START부터 COUNT개를 넣습니다. 기다림은 <code>put</code> 함수 안에서 일어나고, 넣은 뒤에 한 줄을 출력합니다. MS를 주면 그만큼 쉬어 속도를 늦춥니다.</p>
+
+<p>첫 번째 실행에서는 생산자가 1부터 10개를 넣으려 했지만 8개에서 멈췄습니다. 빈 칸이 0이 되자 <code>slots</code>에서 잠든 것입니다. 소비자를 실행해 꺼내자 소비자가 <code>slots</code>를 올렸고, 생산자가 깨어나 9와 10을 넣었습니다. 꺼낸 값의 합은 1부터 10까지의 합인 55로, 하나도 빠지거나 겹치지 않았습니다.</p>
+
+<p>두 번째 실행은 생산자 둘과 소비자 하나입니다. 한 생산자는 100~104를, 다른 생산자는 200~204를 넣습니다. 소비자가 느려서(50 ms) 여덟 칸이 차자 생산자가 기다렸고, 204는 101이 나간 뒤에야 들어갔습니다. 먼저 들어간 100~104가 먼저 나왔습니다. 원형 버퍼는 FIFO이기 때문입니다. 합은 510 + 1010 = 1520으로, 열 개가 한 번씩 빠짐없이 왔습니다.</p>
+
+<h3>직접 만든 큐와 1차시의 메시지 큐</h3>
+
+<p>메시지 큐와 파이프는 커널 안에 이런 버퍼와 잠금을 갖고 있습니다. 오늘은 그것을 사용자 공간에 직접 만든 것입니다.</p>
+
+<table>
+<thead>
+<tr><th></th><th>ringbuf — 공유 메모리 + 세마포어</th><th>POSIX 메시지 큐 (1차시)</th></tr>
+</thead>
+<tbody>
+<tr><td>가득 차면</td><td><code>sem_wait(slots)</code>에서 잠든다</td><td><code>mq_send</code>가 잠든다</td></tr>
+<tr><td>비면</td><td><code>sem_wait(items)</code>에서 잠든다</td><td><code>mq_receive</code>가 잠든다</td></tr>
+<tr><td>동시 접근</td><td><code>mutex</code>로 직접 지킨다</td><td>커널이 지킨다</td></tr>
+<tr><td>시스템 호출</td><td>기다려야 할 때만 커널에 들어간다</td><td>넣고 꺼낼 때마다</td></tr>
+<tr><td>프로세스가 죽으면</td><td>잠근 채 죽으면 모두 멈춘다</td><td>큐는 멀쩡하다</td></tr>
+<tr><td>코드와 위험</td><td>직접 짠다 — 순서를 틀리면 교착</td><td>함수 다섯 개</td></tr>
+<tr><td>알맞은 때</td><td>아주 잦거나 큰 데이터 · 자료 구조를 함께 볼 때</td><td>작은 메시지 · 안전이 먼저일 때</td></tr>
+</tbody>
+</table>
+
+<h3>3부 정리: 공유 + 동기화 = 전달</h3>
+
+<p>공유 메모리(원형 버퍼 · head · tail)에 세마포어 셋(slots · items · mutex)을 더하면, 차면 기다리고 비면 기다리는 큐가 됩니다.</p>
+
+<ul>
+<li><strong>세마포어의 두 쓰임:</strong> 잠금은 내가 내리고 내가 올립니다(처음 값 1). 자리 세기는 내가 내리고 상대가 올립니다(처음 값 N · 0).</li>
+<li><strong>지킬 규칙:</strong> 자리를 먼저, 잠금을 나중에 얻습니다. 잠금을 쥔 채 잠들지 않습니다. 공유 데이터에 손대는 코드는 한 함수에 모읍니다.</li>
+<li><strong>고르는 기준:</strong> 대부분의 경우에는 메시지 큐 · 파이프 · 소켓을 씁니다. 아주 잦거나 큰 데이터일 때 공유 메모리 + 세마포어를 씁니다.</li>
+</ul>
+
+<p>파이프와 메시지 큐가 커널 안에서 해 주던 일을 직접 만들어 본 것입니다.</p>
+
+<h2>4부 스레드의 동기화</h2>
+
+<p>같은 문제를 한 프로세스 안의 스레드에서 다시 봅니다. 뮤텍스로 잠그고, 조건 변수로 기다리고, 세마포어로 수를 셉니다.</p>
+
+<h3>스레드: 처음부터 메모리를 함께 쓴다</h3>
+
+<p>1~3부의 프로세스 둘은 각자의 주소 공간을 갖고 있어서 공유 메모리를 만들어 붙여야 했습니다. 스레드는 한 프로세스 안의 실행 흐름 여럿이고 주소 공간이 하나입니다. 전역 변수 · 힙 · 열린 파일(fd)을 모든 스레드가 이미 함께 쓰므로 <code>shm_open</code>도 <code>mmap</code>도 필요 없습니다. 스택만 각자 갖습니다. 지역 변수는 스레드마다 따로이고, 나머지는 모두 조심해야 합니다.</p>
+
+<pre><code>pthread_t t;
+pthread_create(&amp;t, NULL, worker, arg);  /* 새 스레드: worker(arg) */
+pthread_join(t, &amp;result);               /* 끝나기를 기다린다 */</code></pre>
+
+<p>헤더는 <code>&lt;pthread.h&gt;</code>이고 <code>gcc -pthread</code>로 컴파일합니다. <code>fork</code>와 <code>wait</code>에 해당하는 것이 <code>pthread_create</code>와 <code>pthread_join</code>입니다. 공유 메모리를 만들 필요가 없다는 것은, 그만큼 동기화가 더 자주 필요하다는 뜻입니다.</p>
+
+<h3>도구 셋: 뮤텍스 · 조건 변수 · 세마포어</h3>
+
+<p>2 · 3부에서는 세마포어 하나로 잠금과 기다림을 모두 했습니다. 스레드 프로그램에서는 보통 뮤텍스와 조건 변수로 나눠 씁니다.</p>
+
+<ul>
+<li><strong>뮤텍스 — 잠근다.</strong> 한 번에 한 스레드만 들어갑니다. 잠근 스레드가 직접 풉니다. <code>pthread_mutex_lock</code> · <code>unlock</code></li>
+<li><strong>조건 변수 — 기다린다.</strong> 조건이 참이 될 때까지 잠듭니다. 늘 뮤텍스와 함께 씁니다. <code>pthread_cond_wait</code> · <code>signal</code></li>
+<li><strong>세마포어 — 센다.</strong> 수가 남았으면 지나가고 0이면 잠듭니다. 누구나 올릴 수 있습니다. <code>sem_wait</code> · <code>sem_post</code></li>
+</ul>
+
+<table>
+<thead>
+<tr><th></th><th>뮤텍스</th><th>조건 변수</th><th>세마포어</th></tr>
+</thead>
+<tbody>
+<tr><td>기억하는 것</td><td>잠김 / 열림, 그리고 누가 잠갔는지</td><td>없다 — 기다리는 스레드들뿐</td><td>정수 하나</td></tr>
+<tr><td>푸는 · 깨우는 쪽</td><td>잠근 스레드만 푼다</td><td>조건을 바꾼 스레드가 signal</td><td>아무 스레드나 post</td></tr>
+<tr><td>알맞은 일</td><td>임계 구역 지키기</td><td>"빌 때까지 · 찰 때까지" 기다리기</td><td>자리 세기 · K개까지 들여보내기</td></tr>
+</tbody>
+</table>
+
+<p>뮤텍스는 "하나만", 조건 변수는 "~할 때까지", 세마포어는 "몇 개까지"입니다.</p>
+
+<h3>뮤텍스: 잠근 스레드가 푼다</h3>
+
+<table>
+<thead>
+<tr><th>함수</th><th>하는 일</th></tr>
+</thead>
+<tbody>
+<tr><td><code>PTHREAD_MUTEX_INITIALIZER</code></td><td>전역 뮤텍스를 열린 상태로 만든다</td></tr>
+<tr><td><code>pthread_mutex_lock(&amp;m)</code></td><td>잠근다. 잠겨 있으면 잠든다</td></tr>
+<tr><td><code>pthread_mutex_trylock(&amp;m)</code></td><td>기다리지 않는다 — 잠겨 있으면 <code>EBUSY</code></td></tr>
+<tr><td><code>pthread_mutex_unlock(&amp;m)</code></td><td>푼다. 잠근 스레드만 불러야 한다</td></tr>
+<tr><td><code>pthread_mutex_destroy(&amp;m)</code></td><td>끝낸다 (<code>pthread_mutex_init</code>으로 만든 것)</td></tr>
+</tbody>
+</table>
+
+<p>처음 값 1인 세마포어와 다른 점은 세 가지입니다.</p>
+
+<ol>
+<li>소유자가 있습니다. 잠근 스레드만 풀 수 있고, "누가 쥐고 있나"를 따질 수 있습니다.</li>
+<li>값이 없습니다. post를 두 번 해서 둘이 들어가는 실수가 없습니다. 잠금 전용이어서 수를 세는 일은 하지 않습니다.</li>
+<li>실패하면 -1이 아니라 오류 번호를 돌려줍니다(<code>errno</code>를 쓰지 않습니다). 반환값이 0이면 성공이고 아니면 <code>EBUSY</code> · <code>EINVAL</code> 같은 오류 번호이므로, <code>perror</code> 대신 <code>strerror(반환값)</code>을 씁니다.</li>
+</ol>
+
+<p>임계 구역을 짧게 하라는 2부의 규칙은 그대로입니다. 잠근 채 오래 걸리는 일을 하지 않습니다.</p>
+
+<h3>예제 thcount: 스레드에서도 사라지고, 잠그면 맞는다</h3>
+
+<p><a href="thcount.html">thcount</a>는 스레드 넷이 전역 변수 하나를 세 가지 방법(잠금 없이 · 뮤텍스 · 세마포어)으로 올립니다. 스레드에서도 1부와 같은 문제가 생기고 뮤텍스가 그 답이라는 것을 확인하려는 예제입니다. 사용법은 <code>./thcount none | mutex | sem [THREADS [N]]</code>이고 기본값은 4개 × 100만 번입니다.</p>
+
+<p><code>count</code>는 전역 변수라서 모든 스레드가 같은 것을 봅니다. 공유 메모리를 만들지 않았습니다. 각 스레드가 실행하는 <code>worker</code>는 방식에 따라 다음 셋 중 하나를 반복합니다.</p>
+
+<pre><code>if (mode == 'm') {
+    pthread_mutex_lock(&amp;lock);      /* 잠근 스레드가 */
+    count++;
+    pthread_mutex_unlock(&amp;lock);    /* 직접 푼다 */
+} else if (mode == 's') {
+    sem_wait(&amp;sem);
+    count++;
+    sem_post(&amp;sem);
+} else {
+    count++;                        /* 읽고 · 더하고 · 쓴다 */
+}</code></pre>
+
+<p>세마포어는 <code>sem_init(&amp;sem, 0, 1)</code>로 만듭니다. 둘째 인자가 0이면 한 프로세스의 스레드 사이에서 쓴다는 뜻입니다. <code>main</code>은 <code>pthread_create</code>로 스레드마다 <code>worker</code>를 실행시키는데, <code>fork</code>와 달리 메모리를 복사하지 않습니다. 그다음 <code>pthread_join</code>으로 모두 끝나기를 기다린 뒤에 값을 읽습니다. <code>pthread_join</code>은 스레드의 <code>wait</code>입니다.</p>
+
+<p>10코어 기계에서 실행한 결과입니다.</p>
+
+<ul>
+<li><strong>잠금 없이는 절반도 안 됩니다.</strong> 400만 중 188만, 160만이 나왔습니다. 프로세스 때와 같은 경쟁 조건입니다.</li>
+<li><strong>잠그면 정확합니다.</strong> 뮤텍스도 세마포어도 400만입니다. 대신 0.006초가 0.3~0.4초가 됩니다.</li>
+<li><strong>뮤텍스가 조금 빠릅니다.</strong> 0.335초 대 0.441초입니다. 다만 이 기계, 이 실행의 값이고 차이는 크지 않습니다.</li>
+</ul>
+
+<h3>조건 변수: 뮤텍스만으로는 기다릴 수 없다</h3>
+
+<p>버퍼가 비었으면 소비자는 값이 올 때까지 기다려야 합니다. 그런데 뮤텍스는 잠그고 푸는 것뿐이어서 "조건이 될 때까지"를 표현할 수 없습니다. 세 가지 방법을 비교해 봅니다.</p>
+
+<p>① 잠근 채 기다리면 교착입니다. 넣는 쪽이 잠그지 못하므로 조건은 영원히 바뀌지 않습니다.</p>
+
+<pre><code>lock(&amp;m);
+while (used == 0)
+    ;  /* 영원히 */
+v = buf[head];
+unlock(&amp;m);</code></pre>
+
+<p>② 풀고 잠그며 돌면 동작은 하지만 바쁜 대기여서 CPU를 태웁니다.</p>
+
+<pre><code>for (;;) {
+    lock(&amp;m);
+    if (used &gt; 0) break;
+    unlock(&amp;m);
+}</code></pre>
+
+<p>③ 조건 변수로 잠들면 CPU를 쓰지 않고 자고, 넣는 쪽이 깨워 줍니다.</p>
+
+<pre><code>lock(&amp;m);
+while (used == 0)
+    cond_wait(&amp;c, &amp;m);
+v = buf[head];
+unlock(&amp;m);</code></pre>
+
+<p><code>pthread_cond_wait(&amp;c, &amp;m)</code>는 한 번에 ① m을 풀고 → ② 잠들고 → ③ 깨어나면 m을 다시 잠급니다. ①과 ②는 쪼개지지 않기 때문에 그 사이의 signal을 놓치지 않습니다. 3부의 규칙 "잠금을 쥔 채 잠들지 않는다"를 <code>pthread_cond_wait</code>가 대신 지켜 주는 것입니다. 뮤텍스는 "누가 들어가나"를, 조건 변수는 "언제 들어가나"를 맡습니다.</p>
+
+<h3>조건 변수를 쓰는 틀</h3>
+
+<p>기다리는 쪽과 알리는 쪽은 각각 정해진 틀을 따릅니다.</p>
+
+<pre><code>/* 기다리는 쪽 */
+pthread_mutex_lock(&amp;m);
+while (!조건)                 /* if가 아니다 */
+    pthread_cond_wait(&amp;c, &amp;m);
+/* 조건이 참이다: 일을 한다 */
+pthread_mutex_unlock(&amp;m);
+
+/* 알리는 쪽 */
+pthread_mutex_lock(&amp;m);
+/* 조건을 바꾼다: used++ */
+pthread_cond_signal(&amp;c);      /* 하나를 깨운다 */
+pthread_mutex_unlock(&amp;m);</code></pre>
+
+<ul>
+<li><strong>왜 while인가.</strong> 깨어난 사이에 다른 스레드가 먼저 가져갔을 수 있습니다. 이유 없이 깨는 일도 있습니다. 그래서 깨면 다시 확인합니다.</li>
+<li><strong>왜 뮤텍스와 함께인가.</strong> 조건(<code>used</code>)은 공유 데이터입니다. 확인과 잠들기 사이에 바뀌면 신호를 놓칩니다.</li>
+<li><strong>signal과 broadcast.</strong> signal은 하나를, broadcast는 모두를 깨웁니다. "끝났다"처럼 모두가 알아야 하면 broadcast를 씁니다.</li>
+</ul>
+
+<p>조건 변수는 값을 기억하지 않습니다. 기다리는 스레드가 없을 때의 signal은 그냥 사라집니다. 마감 시각까지만 기다리는 <code>pthread_cond_timedwait</code>도 있습니다.</p>
+
+<h3>예제 thqueue: 뮤텍스 하나와 조건 변수 둘</h3>
+
+<p><a href="thqueue.html">thqueue</a>는 뮤텍스만으로는 못 하는 "조건이 될 때까지 기다리기"를 조건 변수로 해 보는 생산자–소비자 예제입니다. 3부의 ringbuf와 같은 문제를 다른 도구로 풀어 둘을 비교합니다. 사용법은 <code>./thqueue P C N [MS]</code>로, 생산자 P개가 N개씩 넣고 소비자 C개가 꺼냅니다.</p>
+
+<p>도구는 뮤텍스 하나와 조건 변수 둘(가득 차지 않음 <code>not_full</code> · 비지 않음 <code>not_empty</code>)입니다. <code>put</code>은 가득 찼으면 기다립니다.</p>
+
+<pre><code>pthread_mutex_lock(&amp;lock);
+while (used == SIZE) {              /* if가 아니라 while: 깨면 다시 본다 */
+    full_waits++;
+    pthread_cond_wait(&amp;not_full, &amp;lock);    /* 잠금을 풀고 잠든다 */
+}                                   /* 돌아왔을 때는 다시 잠근 상태다 */
+buf[tail] = v;
+tail = (tail + 1) % SIZE;
+used++;
+pthread_cond_signal(&amp;not_empty);    /* 기다리는 소비자 하나를 깨운다 */
+pthread_mutex_unlock(&amp;lock);</code></pre>
+
+<p><code>get</code>은 비었으면 기다리는데, 조건이 둘입니다. 비었고, 아직 끝이 아닐 때만 기다립니다. 조건식은 이렇게 마음대로 쓸 수 있습니다.</p>
+
+<pre><code>while (used == 0 &amp;&amp; !done) {
+    empty_waits++;
+    pthread_cond_wait(&amp;not_empty, &amp;lock);
+}
+if (used == 0) {                    /* 비었고, 더 올 것도 없다 */
+    pthread_mutex_unlock(&amp;lock);
+    return -1;
+}</code></pre>
+
+<p>비었는데 반복문을 빠져나왔다면 더 올 것이 없다는 뜻이므로 뮤텍스를 풀고 -1을 돌려줍니다. 그렇지 않으면 값을 꺼내고 <code>used</code>를 내린 뒤 <code>pthread_cond_signal(&amp;not_full)</code>로 기다리는 생산자 하나를 깨웁니다.</p>
+
+<p><code>main</code>은 소비자와 생산자 스레드를 만들면서 번호를 인자로 넘기고, 먼저 생산자가 모두 끝나기를 기다립니다. 그다음 끝을 알립니다.</p>
+
+<pre><code>pthread_mutex_lock(&amp;lock);
+done = 1;                           /* 조건이 바뀌었으니 */
+pthread_cond_broadcast(&amp;not_empty); /* 기다리는 소비자를 모두 깨운다 */
+pthread_mutex_unlock(&amp;lock);</code></pre>
+
+<p>기다리던 소비자가 모두 깨어나 끝을 확인합니다. 마지막으로 <code>pthread_join(c[i], &amp;sum)</code>이 각 소비자 스레드의 반환값(꺼낸 값의 합)을 받습니다. <code>wait</code>가 종료 상태를 받는 것과 같습니다.</p>
+
+<p>실행에서는 든 칸의 수가 8이 되면 생산자가 멈추는 것을 봅니다. 202를 넣자 8칸이 찼고, 그 뒤로는 하나 꺼내야 하나 넣습니다. 값은 넣은 순서대로(100~104, 200~204) 나오고, 합 1520은 3부의 ringbuf와 같습니다. 생산자 넷 · 소비자 둘로 40만 개를 돌려도 합이 기대와 같았고, 기다림은 약 15만 번 일어났습니다.</p>
+
+<h3>스레드 사이의 세마포어: 수를 센다</h3>
+
+<p>뮤텍스는 "하나만"입니다. "K개까지"는 세마포어가 합니다. 동시에 여는 연결의 수나 동시에 돌리는 작업의 수를 제한할 때 이렇게 씁니다. 3부의 slots · items도 같은 "수 세기"였습니다.</p>
+
+<pre><code>sem_init(&amp;room, 0, 2);       /* 0: 스레드 사이 · 2: 자리 수 */
+sem_wait(&amp;room);   /* 일을 한다 */   sem_post(&amp;room);</code></pre>
+
+<ul>
+<li><strong>처음 값이 자리 수입니다.</strong> 2로 두면 둘까지 지나가고 셋째부터 잠듭니다. 하나가 나오면 다음이 들어갑니다. 스레드 여섯 개라면 둘이 안에 있는 동안 나머지 넷은 문 앞에서 잡니다.</li>
+<li><strong>둘째 인자가 0입니다.</strong> <code>sem_init(&amp;s, 0, 값)</code>. 공유 메모리가 필요 없고 전역 변수면 됩니다.</li>
+<li><strong>소유자가 없습니다.</strong> 들어간 스레드와 다른 스레드가 post해도 됩니다. 뮤텍스와 다른 점입니다.</li>
+</ul>
+
+<h3>예제 thlimit: 안에는 언제나 둘까지</h3>
+
+<p><a href="thlimit.html">thlimit</a>는 계수 세마포어로 스레드 여섯 개 가운데 한 번에 둘만 들어가게 합니다. 세마포어가 잠금이 아니라 "수를 세는 도구"로 쓰이는 경우를 확인하는 예제입니다. 사용법은 <code>./thlimit THREADS K</code>이고, 예를 들면 <code>./thlimit 6 2</code>입니다.</p>
+
+<p>각 스레드는 자리를 얻고, 일하고, 자리를 돌려줍니다.</p>
+
+<pre><code>sem_wait(&amp;room);                    /* 자리가 없으면 여기서 잔다 */
+
+pthread_mutex_lock(&amp;lock);          /* inside · peak는 뮤텍스가 지킨다 */
+inside++;
+if (inside &gt; peak) peak = inside;
+printf("[스레드 %ld] 들어감 (안에 %d개)\n", id, inside);
+pthread_mutex_unlock(&amp;lock);
+
+usleep(100 * 1000);                 /* 안에서 0.1초 동안 일한다 */
+…
+sem_post(&amp;room);                    /* 자리 +1: 기다리던 스레드가 들어온다 */</code></pre>
+
+<p><code>room</code>의 처음 값은 K로 정해 두었고, 0이면 <code>sem_wait</code>에서 잠듭니다. 눈여겨볼 것은 뮤텍스도 함께 쓴다는 점입니다. 안에 있는 스레드 수 <code>inside</code>와 최댓값 <code>peak</code>는 공유 데이터이므로 뮤텍스가 지킵니다. 세는 일은 세마포어, 공유 변수를 지키는 일은 뮤텍스로 나눠 맡깁니다. 세는 것과 지키는 것은 다른 일입니다.</p>
+
+<p>실행 결과에서 확인할 것은 다음과 같습니다.</p>
+
+<ul>
+<li><strong>안에 2개를 넘지 않습니다.</strong> 셋째 스레드는 첫째가 나온 뒤에야 들어갔고, 끝까지 최대 2개입니다.</li>
+<li><strong>나오면 곧 들어옵니다.</strong> "1 나옴" 바로 다음이 "3 들어감"입니다. post가 깨운 것입니다.</li>
+<li><strong>순서는 보장하지 않습니다.</strong> 누가 먼저 들어갈지는 실행마다 다를 수 있습니다. 세마포어는 수만 지킵니다.</li>
+</ul>
+
+<h3>같은 큐, 두 가지 방법: ringbuf와 thqueue</h3>
+
+<p>둘 다 같은 입력에서 합 1520을 냈습니다. 도구가 달라도 지키는 것은 같습니다.</p>
+
+<table>
+<thead>
+<tr><th></th><th>ringbuf (3부) — 세마포어 셋</th><th>thqueue (4부) — 뮤텍스 + 조건 변수</th></tr>
+</thead>
+<tbody>
+<tr><td>누가 함께 쓰나</td><td>서로 다른 프로세스 (공유 메모리)</td><td>한 프로세스의 스레드 (전역 변수)</td></tr>
+<tr><td>가득 찼을 때</td><td><code>sem_wait(slots)</code>에서 잠든다</td><td><code>while (used == SIZE) cond_wait(not_full)</code></td></tr>
+<tr><td>비었을 때</td><td><code>sem_wait(items)</code>에서 잠든다</td><td><code>while (used == 0) cond_wait(not_empty)</code></td></tr>
+<tr><td>버퍼 지키기</td><td><code>sem_wait(mutex) … sem_post(mutex)</code></td><td><code>pthread_mutex_lock … unlock</code></td></tr>
+<tr><td>든 칸의 수</td><td>세마포어 값이 기억한다</td><td>변수 <code>used</code>를 직접 둔다</td></tr>
+<tr><td>순서를 틀리면</td><td>잠금을 먼저 잡으면 교착</td><td>wait가 잠금을 풀어 주므로 그 실수가 없다</td></tr>
+<tr><td>조건을 바꾸려면</td><td>세마포어를 더 만든다</td><td>while의 조건식만 고친다 (예: <code>&amp;&amp; !done</code>)</td></tr>
+</tbody>
+</table>
+
+<p>조건이 "수 하나"면 세마포어가 짧고, 조건이 복잡하면 뮤텍스 + 조건 변수가 낫습니다.</p>
+
+<h3>4부 정리: 잠그고, 기다리고, 센다</h3>
+
+<ul>
+<li><strong>뮤텍스 — 잠근다.</strong> <code>pthread_mutex_lock(&amp;m);</code> 임계 구역 <code>pthread_mutex_unlock(&amp;m);</code> 잠근 스레드가 풉니다. (예제 thcount)</li>
+<li><strong>조건 변수 — 기다린다.</strong> <code>while (!조건) pthread_cond_wait(&amp;c, &amp;m);</code> 조건을 바꾼 쪽이 signal · broadcast 합니다. 늘 뮤텍스와 함께, 늘 while입니다. (예제 thqueue)</li>
+<li><strong>세마포어 — 센다.</strong> <code>sem_init(&amp;s, 0, K);</code> <code>sem_wait(&amp;s);</code> <code>sem_post(&amp;s);</code> K개까지 들어가고 누구나 올립니다. (예제 thlimit)</li>
+</ul>
+
+<p>이 도구들을 프로세스 사이에서 쓰려면, 세마포어는 <code>sem_init</code>의 둘째 인자를 1로 하고 공유 메모리 안에 둡니다(2 · 3부). 뮤텍스와 조건 변수도 공유 메모리 안에 두고 <code>PTHREAD_PROCESS_SHARED</code> 속성을 주면 됩니다. 프로세스든 스레드든 규칙은 같습니다. 함께 쓰는 데이터는 한 번에 하나만, 기다릴 때는 잠금을 놓고 기다립니다.</p>
+
+<h2>실습 과제와 막힐 때 보는 순서</h2>
+
+<h3>실습 과제: 예제를 넓힌다</h3>
+
+<ol>
+<li><strong>잠금 줄이기</strong> — <code>./semcount batch 1000000</code>을 만듭니다. 100번은 자기 변수에 세고, 한 번 잠가 한꺼번에 더합니다. 결과는 여전히 정확해야 합니다. <code>time</code>으로 <code>add</code>와 비교하고, 묶음 크기를 10 · 100 · 1000으로 바꿔 표를 만듭니다.</li>
+<li><strong>교착을 만들고 고친다</strong> — <code>ringbuf.c</code>의 <code>put</code>에서 <code>sem_wait</code> 두 줄(slots와 mutex)의 순서를 바꿉니다. <code>put 1 20 &amp;</code> 뒤에 <code>get 20</code>을 실행해 둘 다 멈추는지 확인하고, <code>strace -p PID</code>로 어디서 자는지(futex) 봅니다. 그다음 되돌리고, <code>sem_wait</code>를 <code>EINTR</code>에 안전하게 감쌉니다.</li>
+<li><strong>스레드 큐를 세마포어로</strong> — thqueue를 세마포어 셋으로 다시 씁니다(<code>thqsem.c</code>). <code>sem_init(&amp;s, 0, 값)</code> 세 개를 쓰고 put · get은 <code>ringbuf.c</code>처럼 만듭니다. 합이 기대와 같은지 확인하고 <code>time</code>으로 thqueue와 비교합니다(<code>4 2 100000</code>). 또 thqueue의 <code>while</code>을 <code>if</code>로 바꾸면 어떻게 되는지 소비자 둘로 실행해 봅니다.</li>
+</ol>
+
+<p>제출물은 소스 · Makefile · 실행 기록 <code>lab.txt</code> · 시간 비교표(과제 ①과 ③)입니다.</p>
+
+<h3>막힐 때 보는 순서</h3>
+
+<ol>
+<li><code>ls -l /dev/shm</code> — 지난 실행의 것이 남았는지 봅니다.</li>
+<li><code>sem_getvalue</code> — 값이 0에서 변하지 않는지 봅니다.</li>
+<li><code>ps</code> · <code>strace -p PID</code> — 누가 futex에서 자는지 봅니다.</li>
+<li><code>rm /dev/shm/이름</code> — 지우고 다시 만듭니다.</li>
+</ol>
+
+<p><code>/proc/PID/maps</code>에서 <code>/dev/shm/이름</code> 줄을 찾으면 그 프로세스가 공유 메모리를 붙이고 있는지 알 수 있습니다.</p>
+
+<table>
+<thead>
+<tr><th>증상</th><th>흔한 원인</th><th>고칠 곳</th></tr>
+</thead>
+<tbody>
+<tr><td>Bus error (SIGBUS)</td><td><code>ftruncate</code>를 빼먹었다 — 크기 0인 객체</td><td>만드는 쪽에서 <code>ftruncate(fd, 크기)</code></td></tr>
+<tr><td><code>shm_open: File exists</code></td><td>지난 실행이 지우지 않았다</td><td><code>rm /dev/shm/이름</code> · 끝낼 때 <code>shm_unlink</code></td></tr>
+<tr><td>값이 가끔 틀린다</td><td>잠그지 않은 곳이 있다</td><td>공유 데이터에 손대는 곳을 모두 찾는다</td></tr>
+<tr><td>시작하자마자 멈춘다</td><td>지난 실행이 잠근 채 죽었다</td><td>지우고 다시 init · <code>sem_timedwait</code></td></tr>
+<tr><td>가득 차면 멈춘다</td><td>잠금을 먼저 잡았다 (교착)</td><td>자리(slots)를 먼저, 잠금을 나중에</td></tr>
+<tr><td>스레드가 깨어나지 않는다</td><td>signal을 빠뜨렸다 · if로 한 번만 확인했다</td><td>조건을 바꾸면 signal · while로 다시 확인</td></tr>
+</tbody>
+</table>
+
+<h2>정리</h2>
+
+<ul>
+<li>공유 메모리는 같은 물리 메모리를 여러 주소 공간에 붙입니다(<code>shm_open</code> → <code>ftruncate</code> → <code>mmap</code>). 복사도 시스템 호출도 없어 가장 빠릅니다.</li>
+<li>붙인 주소가 프로세스마다 달라 포인터는 넣지 않습니다. 프로세스가 끝나도 내용이 남으므로(커널 수명) 만든 쪽이 지웁니다.</li>
+<li><code>count++</code>는 세 단계라서 여럿이 잠금 없이 하면 값이 사라집니다. 세마포어의 wait · post로 임계 구역을 지키면 정확해지지만 느려지고, 잠근 채 죽으면 풀리지 않습니다.</li>
+<li>공유 메모리 + 세마포어 셋 = 큐입니다. 자리를 먼저 얻고 잠금을 나중에 얻습니다.</li>
+<li>스레드는 처음부터 메모리를 함께 씁니다. 뮤텍스로 잠그고, 조건 변수로 기다리고(늘 while), 세마포어로 수를 셉니다.</li>
+</ul>
+    </article>
   </main>
 </body>
 </html>

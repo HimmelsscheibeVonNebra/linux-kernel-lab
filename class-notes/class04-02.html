@@ -1,0 +1,440 @@
+<p>이번 시간에는 파일의 내용이 아니라 <strong>파일 속성</strong>을 집중해서 다룹니다. 파일 내용을 읽고 쓰는 일과, 파일의 종류·권한·소유권·크기·시간을 확인하는 일은 서로 다른 작업입니다. 속성을 조회하는 방법을 먼저 익힌 뒤 권한을 바꿔 보고, 크기와 시간을 비교하고, 마지막에는 파일 이름을 지운 뒤에도 열린 파일 디스크립터(FD)로 속성을 조회해 봅니다. 실습에서는 inode 번호 같은 숫자 자체보다 <em>작업 전후에 무엇이 같고 무엇이 달라졌는지</em>를 비교하는 것이 핵심입니다.</p>
+
+<h2>복습: 내용·속성·이름과 디렉토리</h2>
+
+<h3>파일 내용과 파일 속성, 파일 이름</h3>
+<p>하나의 파일을 이야기할 때는 세 가지를 구별해야 합니다.</p>
+<ul>
+<li><strong>파일 내용</strong>: <code>read</code>와 <code>write</code>로 읽고 쓰는 바이트입니다.</li>
+<li><strong>파일 속성</strong>: 종류, 권한, 소유자, 크기, 시간 등의 정보입니다. <code>stat</code> 계열 함수가 다루는 대상입니다.</li>
+<li><strong>파일 이름</strong>: 디렉토리가 관리하는, 이름과 대상 사이의 연결입니다.</li>
+</ul>
+<p>내용이 완전히 같은 두 파일이라도 inode와 소유자, 수정 시각은 다를 수 있습니다. 파일을 복사하면 바이트 내용은 같지만 별도의 inode를 가진 다른 객체가 만들어지기 때문입니다. 반대로 내용이 없는 0바이트 파일도, 존재하는 이상 종류·권한·소유자 같은 속성을 가집니다.</p>
+<p>파일 이름은 <code>struct stat</code>의 필드가 아니라는 점도 기억해 둡니다. 이름은 디렉토리 쪽 정보입니다. 또한 inode 번호는 같은 파일시스템 안에서만 의미가 있으므로, 두 파일이 같은 파일인지 비교할 때는 <code>st_dev</code>와 <code>st_ino</code>를 함께 봅니다.</p>
+
+<h3>디렉토리 트리와 경로 해석</h3>
+<p>디렉토리 구조는 루트 <code>/</code>에서 시작합니다. 디렉토리 안에는 파일과 다른 디렉토리가 있고, 경로는 각 이름을 차례로 찾아 가며 해석합니다. 예를 들어 루트에서 <code>usr</code>, <code>local</code>을 차례로 선택하면 <code>/usr/local</code>이라는 경로가 됩니다. 이때 중간의 <code>usr</code>은 다음 이름을 검색할 수 있는 디렉토리여야 합니다.</p>
+<p>디렉토리도 inode를 가집니다. 디렉토리의 데이터에는 이름과 inode 번호의 연결이 들어 있습니다.</p>
+
+<h3>절대 경로의 탐색</h3>
+<p>절대 경로는 루트부터 해석합니다. <code>/usr/bart/git/gui.py</code>라면 <code>/</code>에서 <code>usr</code>, <code>bart</code>, <code>git</code>을 차례로 검색하고, 마지막 이름 <code>gui.py</code>에 연결된 파일을 찾습니다. 각 디렉토리의 이름 엔트리에서 다음 inode를 찾아 가는 과정이므로, 전체 경로 문자열이 파일 inode의 "이름 필드"에 저장되어 있다고 생각하면 안 됩니다.</p>
+<p>현재 작업 디렉토리를 바꾸어도 절대 경로의 시작점은 프로세스가 보는 루트 디렉토리입니다. 여기서의 설명은 마운트나 심볼릭 링크 같은 세부 동작을 생략한 것입니다.</p>
+
+<h3>상대 경로와 현재 디렉토리</h3>
+<p>상대 경로는 현재 작업 디렉토리를 기준으로 해석합니다. 현재 디렉토리가 <code>/usr/bart</code>일 때 다음 호출은 <code>/usr/bart/prog.c</code>를 찾습니다.</p>
+<pre><code>open("prog.c", O_RDONLY)</code></pre>
+<p>같은 <code>prog.c</code>라는 문자열도 현재 디렉토리가 바뀌면 다른 파일을 가리킬 수 있습니다. 현재 디렉토리가 <code>/usr/bart/git</code>이라면 그 디렉토리에서 <code>prog.c</code>를 새로 검색합니다. 이것은 일반 <code>open</code>의 상대 경로에 대한 설명이며, <code>openat</code> 계열은 지정한 디렉토리 FD를 기준으로 삼을 수 있습니다.</p>
+
+<h3>디렉토리·inode·데이터 블록</h3>
+<p><code>open("/a/b/c.c", O_RDONLY)</code>와 그 뒤의 <code>read</code>가 이름 검색과 내용 읽기를 어떻게 연결하는지 순서대로 따라가 보면 다음과 같습니다.</p>
+<ol>
+<li>루트 디렉토리의 inode를 읽습니다.</li>
+<li>루트 디렉토리의 데이터에서 <code>a</code>를 검색합니다.</li>
+<li><code>a</code>의 inode를 읽습니다.</li>
+<li><code>a</code>의 데이터에서 <code>b</code>를 검색합니다.</li>
+<li><code>b</code>의 inode를 읽습니다.</li>
+<li><code>b</code>의 데이터에서 <code>c.c</code>를 검색합니다.</li>
+<li>일반 파일 <code>c.c</code>의 inode를 읽습니다.</li>
+<li>그 inode가 가리키는 실제 파일 데이터를 읽습니다.</li>
+</ol>
+<p>여기서 강조할 차이는 <strong>디렉토리 데이터</strong>는 이름과 inode의 연결을 담고, <strong>일반 파일 데이터</strong>는 내용 바이트를 담는다는 점입니다. 위의 번호는 각 디렉토리가 한 블록에 들어가고 필요한 정보가 캐시되어 있지 않다고 가정한 설명용 읽기 순서입니다. 실제 Linux가 항상 여덟 번의 물리 디스크 입출력을 한다는 뜻은 아니며, 실제 횟수는 캐시와 파일시스템 등에 따라 달라집니다. 이렇게 찾아낸 inode의 속성을 읽는 것이 바로 다음에 다룰 <code>stat</code>입니다.</p>
+
+<h2>1부 파일 속성 조회</h2>
+<p>속성 조회에서는 <strong>어떤 객체를 조회하는지</strong>와 <strong>반환값</strong>을 먼저 확인합니다. 넘긴 것이 이름인지 FD인지, 심볼릭 링크를 따라가는지를 확인하고, 반환값을 검사한 뒤에야 구조체 필드를 읽습니다.</p>
+
+<h3>ls -l의 각 열과 파일 속성</h3>
+<p><code>ls -l</code>의 한 줄은 여러 파일 속성을 모아서 보여 줍니다.</p>
+<pre><code>$ ls -l note.txt
+-rw-r----- 2 student lab 4 Sep 22 09:00 note.txt
+
+# -           파일 종류
+# rw-r-----   기본 접근 권한
+# 2           하드 링크 수
+# student lab 소유자와 그룹
+# 4           일반 파일의 바이트 크기
+# Sep 22 ...  기본 표시: 수정 시각</code></pre>
+<ul>
+<li><strong>권한과 종류</strong>: 첫 문자(종류)와 그다음 9개 문자(권한)를 나누어 읽습니다.</li>
+<li><strong>소유권</strong>: 실제로 저장된 것은 UID와 GID라는 숫자이며, <code>ls</code>가 이를 이름으로 변환해 표시할 수 있습니다.</li>
+<li><strong>이름</strong>: <code>note.txt</code>는 디렉토리 엔트리의 이름입니다. 화면에 함께 보인다고 해서 inode 안에 저장된 필드로 혼동하면 안 됩니다.</li>
+</ul>
+<p>위 화면은 설명용 예시이며 계정 이름과 시각은 환경에 따라 달라집니다. <code>ls -n</code>은 숫자 ID를 표시하고, <code>ls -ld</code>는 디렉토리 안의 목록이 아니라 디렉토리 자체의 속성을 보여 줍니다. 크기 열은 일반 파일을 기준으로 설명한 것입니다. 디렉토리의 크기가 4096으로 보인다고 해서 파일이 4096개 들어 있다는 뜻은 아닙니다. 디렉토리 크기를 내부 파일 개수로 해석할 수 없습니다.</p>
+
+<h3>stat, lstat, fstat의 조회 대상</h3>
+<p>세 함수는 모두 <code>&lt;sys/stat.h&gt;</code>에 선언되어 있고 결과를 <code>struct stat</code>에 저장합니다. 차이는 <em>무엇을 조회하느냐</em>에 있습니다.</p>
+<table>
+<thead>
+<tr><th>함수</th><th>조회 대상</th></tr>
+</thead>
+<tbody>
+<tr><td><code>stat(path, &amp;st)</code></td><td>경로가 가리키는 파일을 조회합니다. 마지막 요소가 심볼릭 링크여도 따라갑니다.</td></tr>
+<tr><td><code>lstat(path, &amp;st)</code></td><td>마지막 경로 요소가 심볼릭 링크이면 링크 자체를 조회합니다.</td></tr>
+<tr><td><code>fstat(fd, &amp;st)</code></td><td>이름 대신, 이미 열린 파일 디스크립터가 참조하는 파일을 조회합니다.</td></tr>
+</tbody>
+</table>
+<p>세 함수 모두 성공하면 0, 실패하면 -1을 반환하며, 실패했을 때는 <code>errno</code>를 확인합니다. <code>lstat</code>이 경로의 모든 링크를 무시하는 것은 아닙니다. 링크 자체를 조회하는 것은 <em>마지막 요소</em>에 한해서이고, <code>lstat("dir-link/file")</code>처럼 경로 중간에 있는 심볼릭 링크는 여전히 해석합니다. 또한 속성 조회에서는 파일 내용의 읽기 권한과, 경로에 있는 디렉토리의 검색 권한을 구분해야 합니다.</p>
+
+<h3>struct stat의 주요 필드</h3>
+<p>필드 이름을 그대로 외우기보다 역할별로 묶어 보는 것이 좋습니다.</p>
+<table>
+<thead>
+<tr><th>필드</th><th>의미</th></tr>
+</thead>
+<tbody>
+<tr><td><code>st_dev</code> / <code>st_ino</code></td><td>파일시스템 장치 식별과 inode 번호 — 파일을 식별합니다.</td></tr>
+<tr><td><code>st_mode</code> / <code>st_nlink</code></td><td>종류·권한 비트와 하드 링크 수</td></tr>
+<tr><td><code>st_uid</code> / <code>st_gid</code></td><td>소유 사용자와 그룹의 숫자 ID</td></tr>
+<tr><td><code>st_size</code> / <code>st_blocks</code> / <code>st_blksize</code></td><td>크기와 할당·입출력 정보</td></tr>
+<tr><td><code>st_atim</code> / <code>st_mtim</code> / <code>st_ctim</code></td><td>접근·내용 수정·상태 변경 시각</td></tr>
+</tbody>
+</table>
+<p>inode 번호는 파일시스템마다 겹칠 수 있으므로 <code>st_ino</code>만으로는 서로 다른 파일시스템의 파일을 비교할 수 없고, <code>st_dev</code>를 함께 비교해야 합니다. <code>st_dev</code>는 그 파일이 들어 있는 파일시스템의 장치를 뜻하며, 장치 파일 자체가 나타내는 장치인 <code>st_rdev</code>와는 다릅니다. 시각 필드는 Linux의 POSIX 필드명을 사용했고, <code>st_atime</code> 같은 이름은 그 초 부분에 접근하는 호환 이름으로 볼 수 있습니다. 마지막으로, 모든 필드가 하나의 원자적인 시점을 찍은 스냅샷이라는 보장은 없습니다.</p>
+
+<h3>file_attr: 조회 후 필드 출력</h3>
+<p>예제 <a href="file_attr.html">file_attr</a>는 경로 하나를 조회해 필드를 출력하는 프로그램입니다.</p>
+<ul>
+<li><strong>기본 동작</strong>: 기본적으로 <code>lstat</code>을 호출합니다.</li>
+<li><strong><code>--follow</code> 옵션</strong>: 옵션을 주면 <code>stat</code>으로 바꾸어 대상 파일을 따라갑니다. <code>--follow</code>는 이 예제에서 정의한 옵션입니다.</li>
+<li><strong>출력 자료형</strong>: <code>st_ino</code>나 <code>st_size</code> 같은 정수형을 <code>printf</code>에 맞추기 위해 <code>uintmax_t</code>와 <code>intmax_t</code>로 명시적으로 변환해 <code>%ju</code>와 <code>%jd</code>로 출력합니다.</li>
+</ul>
+<pre><code>struct stat st;
+int rc = follow ? stat(path, &amp;st)
+                : lstat(path, &amp;st);
+if (rc == -1) {
+    perror(path);
+    return 1;
+}
+printf("inode=%ju links=%ju\n",
+       (uintmax_t)st.st_ino,
+       (uintmax_t)st.st_nlink);
+printf("size=%jd\n", (intmax_t)st.st_size);</code></pre>
+<p>조회에 실패하면 구조체를 출력하지 않고 바로 오류로 끝난다는 점을 확인합니다. 실패한 호출 뒤의 <code>st</code>에 들어 있는 값은 이번 조회의 결과가 아니므로 읽어서는 안 됩니다. 완성된 소스는 여기에 더해 인자 검사, 종류·권한 해석, 나노초 단위 시각 출력도 포함합니다.</p>
+
+<h3>파일 종류와 권한 비트 분리</h3>
+<p><code>st_mode</code>에는 권한뿐 아니라 파일 종류도 함께 들어 있습니다. 그래서 두 정보를 분리해서 읽어야 합니다.</p>
+<ul>
+<li><strong>파일 종류</strong>: <code>S_ISREG</code>, <code>S_ISDIR</code> 등의 판정 매크로를 사용합니다.</li>
+<li><strong>기본 rwx</strong>: <code>0777</code> 마스크로 소유자·그룹·기타 권한을 추출합니다.</li>
+<li><strong>특수 비트 포함</strong>: <code>07777</code>은 set-ID와 sticky 비트까지 포함합니다.</li>
+</ul>
+<pre><code>if (S_ISREG(st.st_mode)) puts("regular");
+else if (S_ISDIR(st.st_mode)) puts("directory");
+else if (S_ISLNK(st.st_mode)) puts("symlink");
+else if (S_ISFIFO(st.st_mode)) puts("fifo");
+
+printf("permissions=%04jo\n",
+       (uintmax_t)(st.st_mode &amp; 07777));</code></pre>
+<p><code>st_mode == 0644</code>처럼 <code>st_mode</code> 전체를 권한 값과 직접 비교하면, 종류 비트가 함께 들어 있기 때문에 잘못된 판정이 됩니다. 권한을 보려면 마스크로 권한 부분만 추출하고, 종류를 보려면 <code>S_ISREG</code> 같은 매크로를 씁니다. 완성 예제는 문자·블록 장치와 소켓도 구별합니다.</p>
+
+<h3>링크와 inode의 관계</h3>
+<ul>
+<li><strong>하드 링크</strong>: 같은 파일시스템의 동일한 inode를 가리키는 또 다른 이름입니다. 같은 파일의 다른 이름이므로 inode와 내용을 공유하고, 하드 링크를 추가하면 그 파일의 <code>st_nlink</code>가 증가합니다.</li>
+<li><strong>심볼릭 링크</strong>: 대상 경로를 저장하는 별도의 객체입니다. 링크 자체의 속성은 <code>lstat</code>으로 읽습니다. 심볼릭 링크를 만든다고 해서 대상 파일의 하드 링크 수가 늘어나지는 않습니다.</li>
+<li><strong>파일 동일성</strong>: 두 이름이 같은 파일인지는 <code>st_dev</code>와 <code>st_ino</code>를 함께 비교해서 판단합니다. 이것은 "내용이 일치하는가"와는 다른 질문입니다.</li>
+</ul>
+<p>inode 번호는 파일이 제거된 뒤 재사용될 수 있으므로 영구적인 식별자로 저장해 두어서는 안 됩니다.</p>
+
+<h3>실습 1: 링크의 속성 비교</h3>
+<p>같은 임시 폴더 안에 원본, 하드 링크, 심볼릭 링크를 만들고 <a href="file_attr.html">file_attr</a>로 각각 조회합니다. 숫자를 따로따로 적기보다 무엇이 같고 무엇이 다른지를 표시해 봅니다.</p>
+<pre><code>RUN=$(mktemp -d)
+printf 'ABC\n' &gt; "$RUN/note.txt"
+ln "$RUN/note.txt" "$RUN/hard.txt"
+ln -s note.txt "$RUN/soft.txt"
+
+./file_attr "$RUN/note.txt"
+./file_attr "$RUN/hard.txt"
+./file_attr "$RUN/soft.txt"
+./file_attr --follow "$RUN/soft.txt"
+ln -s missing "$RUN/broken.txt"
+./file_attr --follow "$RUN/broken.txt"</code></pre>
+<ul>
+<li><strong>하드 링크</strong>: <code>note.txt</code>와 <code>hard.txt</code>의 device와 inode가 같고 links가 2인지 비교합니다.</li>
+<li><strong>심볼릭 링크</strong>: 기본 조회(<code>lstat</code>)와 <code>--follow</code>(<code>stat</code>)의 종류·크기를 비교합니다. <code>soft.txt</code>를 기본 조회하면 크기는 저장된 경로 문자열 <code>note.txt</code>의 길이인 8바이트입니다. <code>--follow</code>로 대상을 보면 <code>ABC</code>와 개행으로 이루어진 내용의 크기인 4바이트가 나옵니다.</li>
+<li><strong>깨진 링크</strong>: <code>lstat</code>은 가능하지만 <code>stat</code>은 실패할 수 있습니다. 링크 객체 자체는 여전히 있으므로 기본 조회는 되지만, 대상을 따라가려는 조회는 없는 대상을 찾으려다 실패합니다. 조회 함수가 어느 대상을 찾으려 했는지가 중요합니다.</li>
+</ul>
+<p>마지막 명령이 실패한 뒤에는 기본 조회 <code>./file_attr "$RUN/broken.txt"</code>도 실행해 차이를 확인합니다. 값을 먼저 예측한 뒤 실제 결과를 <code>REPORT.md</code>에 기록합니다. <code>RUN</code> 변수는 이후 실습에서도 계속 쓰므로 같은 터미널을 유지합니다. 의도적으로 실패하는 명령이 있으므로 명령은 한 줄씩 실행합니다.</p>
+
+<h3>조회 실패와 조회 이후의 변화</h3>
+<p>조회가 실패하는 대표적인 원인은 다음과 같습니다.</p>
+<ul>
+<li><strong><code>ENOENT</code> / <code>ENOTDIR</code></strong>: 경로가 없거나, 경로의 중간 요소가 디렉토리가 아닌 경우입니다. 예를 들어 일반 파일 이름 뒤에 <code>/child</code>를 붙인 경로가 후자에 해당합니다.</li>
+<li><strong><code>EACCES</code></strong>: 경로에 있는 디렉토리에서 검색 권한이 부족할 수 있습니다.</li>
+</ul>
+<p>또 하나 주의할 점은 <strong>조회와 사용 사이</strong>의 시간입니다. <code>stat</code>이 성공한 뒤에도 이름이나 권한은 바뀔 수 있습니다. <code>stat</code>이 성공했다고 그 파일의 내용을 반드시 읽을 수 있는 것도 아닙니다. 내용 읽기 권한과 경로 검색 권한은 다르고, 그 사이에 상태가 바뀔 수도 있기 때문입니다. 마찬가지로 먼저 <code>access</code>를 호출해 보아도 그 뒤의 <code>open</code> 성공이 보장되지는 않습니다. 따라서 미리 조회한 결과에 의존하지 말고, 실제로 하려는 호출의 반환값을 검사해야 합니다.</p>
+<p>이미 열린 객체를 다룰 때는 <code>fstat</code>으로 그 FD의 속성을 조회합니다. 다만 <code>fstat</code>이 파일 내용이나 속성을 고정하거나 잠그는 것은 아닙니다.</p>
+
+<h2>2부 권한과 소유권</h2>
+<p>이제 속성을 바꾸어 봅니다. 접근 권한 비트를 읽는 법을 먼저 정리하고, 파일을 만들 때 적용되는 <code>umask</code>와 이미 있는 파일의 권한을 바꾸는 <code>chmod</code>를 구분해 결과를 비교합니다.</p>
+
+<h3>기본 권한과 8진수 표현</h3>
+<p>권한은 소유자(u), 그룹(g), 기타 사용자(o)의 세 범주에 각각 <code>rwx</code>를 부여합니다. <code>r = 4</code>, <code>w = 2</code>, <code>x = 1</code>을 더해 범주마다 8진수 한 자리로 표현합니다.</p>
+<pre><code>0640 = rw-r-----     0755 = rwxr-xr-x</code></pre>
+<p>C 코드에서 <code>0640</code>은 앞의 0 때문에 8진수 상수이고, 모양이 비슷한 <code>640</code>은 전혀 다른 값인 10진수 상수입니다. 그리고 앞에서 본 것처럼 파일 종류와 기본 권한은 <code>st_mode</code>에서 분리해 해석합니다.</p>
+<p>권한 판정은 해당하는 범주 하나를 적용합니다. 프로세스가 파일 소유자와 일치하면 소유자 권한 비트를 적용하며, 소유자 권한이 없다고 해서 더 허용적인 기타 사용자 권한으로 다시 시도하지 않습니다. 실제 접근 판단에는 보조 그룹, ACL, capability 등도 영향을 줍니다.</p>
+
+<h3>권한 비트로 rwx 문자열 만들기</h3>
+<p>아홉 개의 권한 비트를 하나씩 검사하면 <code>ls -l</code>에서 보던 권한 문자열을 직접 만들 수 있습니다.</p>
+<ul>
+<li><strong>비트 검사</strong>: 각 비트와 AND 연산을 해서 권한이 있는지 확인합니다.</li>
+<li><strong>문자 선택</strong>: 켜진 비트는 <code>r</code>, <code>w</code>, <code>x</code>로, 꺼진 비트는 <code>-</code>로 표시합니다.</li>
+<li><strong>문자열 끝</strong>: 9개의 권한 문자 뒤에 널 문자가 들어갈 공간을 둡니다. 출력 문자가 9개인데 배열이 10칸인 이유입니다.</li>
+</ul>
+<pre><code>const mode_t bits[9] = {
+    S_IRUSR, S_IWUSR, S_IXUSR,
+    S_IRGRP, S_IWGRP, S_IXGRP,
+    S_IROTH, S_IWOTH, S_IXOTH
+};
+char out[10];
+for (int i = 0; i &lt; 9; i++)
+    out[i] = (mode &amp; bits[i]) ? "rwx"[i % 3] : '-';
+out[9] = '\0';</code></pre>
+<p>위 코드는 기본 <code>rwx</code> 부분만 발췌한 것입니다. 완성된 <a href="file_attr.html">file_attr</a>는 set-user-ID·set-group-ID·sticky 비트를 실행 문자 자리에 <code>s</code>/<code>S</code>/<code>t</code>/<code>T</code>로 표시하는 처리도 합니다. 예를 들어 set-user-ID가 켜져 있을 때 실행 비트가 없으면 <code>S</code>, 있으면 <code>s</code>입니다.</p>
+
+<h3>일반 파일과 디렉토리의 권한</h3>
+<p>같은 <code>rwx</code>라도 일반 파일과 디렉토리에서 의미가 다릅니다.</p>
+<ul>
+<li><strong>일반 파일의 r / w / x</strong>: 내용 읽기, 내용 쓰기, 프로그램 실행을 허용합니다.</li>
+<li><strong>디렉토리의 r / x</strong>: <code>r</code>은 이름 목록을 읽는 권한이고, <code>x</code>는 파일 실행이 아니라 알고 있는 이름을 검색하고 경로를 통과하는 권한입니다.</li>
+<li><strong>디렉토리의 w와 x</strong>: 디렉토리 안에 이름을 만들거나 지우는 것은 디렉토리를 변경하는 일이므로, 일반적으로 두 권한이 함께 필요합니다.</li>
+</ul>
+<p>파일 내용 쓰기와 파일 이름 삭제는 서로 다른 동작입니다. 그래서 파일에 <code>w</code> 권한이 없다고 그 이름을 절대로 지울 수 없는 것은 아닙니다. 이름 삭제는 부모 디렉토리의 권한에 따라 결정되며, 읽기 전용 파일도 부모 디렉토리 권한에 따라 이름을 지울 수 있습니다. 여기에 sticky bit, ACL, capability, 읽기 전용 파일시스템 같은 추가 조건이 있을 수 있습니다. 실습은 root가 아닌 일반 사용자로, 자신이 만든 임시 디렉토리에서 진행합니다.</p>
+
+<h3>chmod와 fchmod</h3>
+<p><code>chmod</code>는 경로를, <code>fchmod</code>는 열린 FD를 대상으로 권한을 설정합니다.</p>
+<pre><code>/* 경로가 가리키는 파일의 권한 변경 */
+if (chmod(path, 0640) == -1) {
+    perror("chmod");
+    return 1;
+}
+
+/* 이미 열린 파일의 권한 변경 */
+if (fchmod(fd, 0600) == -1) {
+    perror("fchmod");
+    return 1;
+}</code></pre>
+<ul>
+<li><strong>지정한 mode</strong>: 넘긴 값 그대로 권한을 설정합니다. 기존 비트에 자동으로 추가하는 호출이 아닙니다.</li>
+<li><strong>변경 주체</strong>: 일반적으로 파일 소유자나 적절한 권한이 있는 프로세스만 바꿀 수 있습니다.</li>
+<li><strong>변경 결과</strong>: 파일 내용은 그대로여도 inode 상태가 바뀌므로 ctime이 갱신될 수 있습니다.</li>
+</ul>
+<p>두 함수 모두 성공하면 0, 실패하면 -1을 반환합니다. <code>chmod</code>는 마지막 심볼릭 링크를 따라가 대상의 권한을 바꿉니다. Linux에서 일반 심볼릭 링크의 권한은 링크 자체의 접근 제어로 해석하지 않습니다. 그리고 <code>umask</code>는 파일을 만들 때만 적용되므로, <code>chmod</code>에 <code>0640</code>을 넘길 때 umask가 그 값에 다시 적용되지는 않습니다.</p>
+
+<h3>umask와 생성 권한</h3>
+<p><code>umask</code>는 파일을 새로 만들 때 요청한 권한에서 특정 비트를 제거하는 값입니다.</p>
+<ul>
+<li><strong>생성 시 적용</strong>: 요청한 mode에서 mask에 해당하는 비트를 제거합니다.</li>
+<li><strong>비트 연산</strong>: 결과는 <code>mode &amp; ~umask</code>이며 단순한 뺄셈이 아닙니다.</li>
+<li><strong>적용 범위</strong>: 이미 존재하는 파일의 권한은 바꾸지 않습니다. umask를 바꾸어도 앞에서 만든 <code>note.txt</code>의 권한은 그대로입니다.</li>
+</ul>
+<pre><code>/* 기본 ACL이 없는 디렉토리의 예 */
+requested = 0666;
+mask      = 0022;
+result    = 0644;   /* 0666 &amp; ~0022 */
+
+requested = 0666;
+mask      = 0077;
+result    = 0600;   /* 0666 &amp; ~0077 */
+
+/* umask는 없는 권한 비트를 추가하지 않는다. */</code></pre>
+<p>위 블록은 계산을 설명하기 위한 것이며 완성된 C 프로그램이 아닙니다. 뺄셈처럼 보일 때가 있어도 실제로는 비트 마스크 연산이라서, 단순히 빼는 계산은 항상 맞지 않습니다. 예를 들어 요청이 <code>0600</code>이고 mask가 <code>0002</code>인 경우를 뺄셈으로 계산하면 틀린 답이 나옵니다. 요청에 원래 없던 비트는 제거할 것도 없고, umask가 요청에 없는 실행 권한 같은 비트를 더해 주지도 않습니다.</p>
+<p>또한 Linux에서 부모 디렉토리에 기본 ACL이 있으면 생성 권한을 정할 때 그 ACL이 사용되므로 이 단순한 공식을 그대로 적용할 수 없습니다. 이번 실습은 기본 ACL이 없는 환경을 가정합니다.</p>
+
+<h3>생성 후 fstat으로 권한 확인</h3>
+<p>예제 <a href="mode_demo.html">mode_demo</a>는 umask를 임시로 바꾸어 파일을 만든 다음, 실제로 어떤 권한으로 만들어졌는지 <code>fstat</code>으로 확인합니다.</p>
+<pre><code>mode_t old = umask(0077);
+int fd = open(path, O_WRONLY | O_CREAT | O_EXCL,
+              0666);
+int saved = errno;
+umask(old);
+if (fd == -1) {
+    errno = saved;
+    perror("open"); return 1;
+}
+struct stat st;
+if (fstat(fd, &amp;st) == -1) {
+    perror("fstat"); close(fd); return 1;
+}
+close(fd);</code></pre>
+<ul>
+<li><strong>원래 mask 보관</strong>: <code>umask</code> 함수는 이전 mask를 반환하므로 <code>old</code>에 받아 둡니다.</li>
+<li><strong>생성 실패도 처리</strong>: <code>O_EXCL</code> 때문에 이미 있는 이름이면 실패하며, 기존 파일을 덮어쓰지 않습니다.</li>
+<li><strong>원상 복구</strong>: <code>open</code>이 성공하든 실패하든 프로세스의 mask를 복원합니다. 이때 <code>open</code> 실패의 <code>errno</code>는 복원하기 전에 <code>saved</code>에 보관해 두었다가, 오류를 출력하기 전에 되돌려 놓습니다.</li>
+</ul>
+<p>이 코드는 발췌이며, 완성된 mode_demo는 <code>close</code> 실패도 검사합니다. umask는 프로세스 범위의 값이므로 다중 스레드 프로그램에서는 임시로 바꾸는 것에도 주의가 필요합니다. 반대로, 이 프로그램은 셸의 자식 프로세스로 실행되므로 여기서 umask를 바꾸어도 부모 셸의 mask는 바뀌지 않습니다.</p>
+
+<h3>소유 사용자와 그룹 변경</h3>
+<ul>
+<li><strong><code>st_uid</code>와 <code>st_gid</code></strong>: 파일의 소유 사용자와 그룹을 숫자 ID로 저장합니다.</li>
+<li><strong><code>chown(path, uid, gid)</code></strong>: 지정한 소유권을 변경합니다. 인자가 -1이면 UID나 GID를 -1로 바꾸라는 뜻이 아니라 해당 값을 기존대로 유지하라는 특별한 표시입니다. 예를 들어 <code>chown(path, (uid_t)-1, gid)</code>는 소유 사용자는 그대로 두고 그룹만 바꿉니다.</li>
+<li><strong>일반 사용자의 제한</strong>: 소유 사용자를 바꾸는 데는 보통 특권이 필요하고, 그룹 변경도 제한됩니다. 일반 사용자가 임의의 사용자에게 파일 소유권을 넘길 수 있다고 가정하면 안 됩니다.</li>
+</ul>
+<p>소유권 변경도 성공하면 0, 실패하면 -1을 반환합니다. Linux에서 파일 소유자는 자신이 속한 그룹으로는 파일의 그룹을 바꿀 수 있습니다. <code>chown</code>은 심볼릭 링크의 대상을, <code>lchown</code>은 링크 자체를 변경합니다. 소유권을 변경하면 set-ID 비트가 지워질 수 있다는 점도 알아 둡니다. 이번 수업에서는 소유권을 조회하고 권한 조건을 이해하는 데 집중하며, 임의 계정으로의 변경은 요구하지 않습니다.</p>
+
+<h3>실습 2: 생성 권한과 chmod</h3>
+<pre><code>mkdir "$RUN/modes"
+./mode_demo "$RUN/modes"
+./file_attr "$RUN/modes/mask022.txt"
+./file_attr "$RUN/modes/mask077.txt"
+./file_attr "$RUN/modes/groupdir"
+
+chmod 600 "$RUN/note.txt"
+./file_attr "$RUN/note.txt"
+./file_attr "$RUN/hard.txt"</code></pre>
+<ul>
+<li><strong>예상 권한</strong>: 요청 <code>0666</code>과 mask <code>022</code>는 <code>0644</code>, mask <code>077</code>은 <code>0600</code>입니다. 디렉토리 <code>groupdir</code>는 <code>0777</code> 요청과 mask <code>0027</code>로 <code>0750</code>이 예상됩니다.</li>
+<li><strong>생성 후 변경</strong>: <a href="mode_demo.html">mode_demo</a>는 첫 파일을 만든 직후의 권한을 먼저 출력하고, 이어서 <code>fchmod</code>로 <code>0640</code>으로 바꿉니다. 그래서 mode_demo의 출력에는 생성 직후의 <code>0644</code>와 <code>fchmod</code> 후의 <code>0640</code>이 각각 나오고, 나중에 <a href="file_attr.html">file_attr</a>로 <code>mask022.txt</code>를 조회하면 <code>0640</code>이어야 합니다. 이 값이 <code>0644</code>가 아니라고 umask 계산이 틀린 것이 아니므로, 두 출력 시점을 구분해서 기록합니다.</li>
+<li><strong>하드 링크</strong>: <code>note.txt</code>라는 이름으로 권한을 바꾸면 <code>hard.txt</code>로 조회해도 같은 변경이 보입니다. 권한은 이름이 아니라 두 이름이 공유하는 파일의 속성이기 때문입니다.</li>
+</ul>
+<p>mode_demo를 같은 디렉토리에 두 번째로 실행하면 기존 이름 때문에 실패하는데, 이것이 정상입니다.</p>
+
+<h2>3부 파일 크기와 시간 속성</h2>
+<p>파일의 "크기"에도 서로 다른 값이 있습니다. 프로그램이 보는 논리적 크기와 파일시스템이 실제로 할당한 공간을 구분하고, 시간 역시 하나의 날짜로 묶지 않고 세 종류로 나누어 봅니다.</p>
+
+<h3>st_size, st_blocks, st_blksize</h3>
+<table>
+<thead>
+<tr><th>필드</th><th>의미</th></tr>
+</thead>
+<tbody>
+<tr><td><code>st_size</code></td><td>일반 파일의 논리적 크기입니다. 단위는 바이트입니다.</td></tr>
+<tr><td><code>st_blocks</code></td><td>Linux에서는 파일에 할당된 공간을 512바이트 단위로 나타냅니다.</td></tr>
+<tr><td><code>st_blksize</code></td><td>효율적인 파일 입출력을 위한 권장 블록 크기입니다.</td></tr>
+</tbody>
+</table>
+<p>이름이 비슷하지만 <code>st_blksize</code>는 <code>st_blocks</code>의 단위가 아니므로 둘을 곱하면 안 됩니다. 예를 들어 <code>st_blocks</code>가 8이고 <code>st_blksize</code>가 4096이라면 할당량은 8×4096이 아니라 8×512바이트입니다. 그리고 <code>st_blocks × 512</code>와 <code>st_size</code>는 서로 다른 질문에 답하는 값입니다. 앞의 것은 "얼마나 할당되었는가", 뒤의 것은 "논리적으로 얼마나 긴가"입니다. 압축, 희소 파일, 파일시스템 정책 등에 따라 할당량은 달라집니다. 디렉토리의 크기 역시 내부 파일 크기의 합이나 파일 개수가 아닙니다.</p>
+
+<h3>실습 3: 희소 파일의 크기</h3>
+<p>예제 <a href="sparse_demo.html">sparse_demo</a>는 새 파일의 1 MiB 위치로 이동한 뒤 한 바이트만 써서, 논리적 크기와 할당 공간이 다를 수 있음을 보여 줍니다.</p>
+<pre><code>./sparse_demo "$RUN/sparse.bin"
+./file_attr "$RUN/sparse.bin"
+
+# Ubuntu GNU coreutils 명령
+stat -c 'size=%s blocks=%b unit=%B' \
+  "$RUN/sparse.bin"
+du -B1 "$RUN/sparse.bin"
+
+# 코드 핵심: 1 MiB 위치에서 한 바이트 쓰기
+# lseek(fd, 1024 * 1024, SEEK_SET);
+# write(fd, "X", 1);</code></pre>
+<ul>
+<li><strong>논리적 크기</strong>: 1,048,576 위치에 한 바이트를 썼으므로 크기는 1 MiB가 아니라 1,048,577바이트가 됩니다.</li>
+<li><strong>비어 있는 구간</strong>: 기록하지 않은 앞부분을 읽으면 0 값의 바이트가 나옵니다.</li>
+<li><strong>할당 공간</strong>: 논리적 크기와 할당량을 실제 파일시스템에서 비교합니다. 파일시스템이 희소 파일을 지원하면 실제 할당 공간은 논리적 길이보다 작을 수 있습니다.</li>
+</ul>
+<p><code>lseek</code>는 위치만 옮길 뿐이므로 그것만으로는 파일 크기가 늘지 않습니다. 그 뒤에 실제로 쓰기를 해야 크기가 늘어납니다. 실습 파일은 <code>O_EXCL</code>로 새로 만들기 때문에 기존 파일을 덮어쓰지 않습니다. 완성된 sparse_demo는 <code>open</code>, <code>lseek</code>, <code>write</code>, <code>fstat</code>, <code>close</code>의 반환값을 모두 검사합니다. 할당량은 파일시스템에 따라 달라지므로, 특정 숫자가 나와야 하거나 반드시 작은 값이어야 한다고 보지 않습니다. 중요한 것은 단위와 두 크기의 의미를 정확히 설명하는 것입니다.</p>
+
+<h3>atime, mtime, ctime</h3>
+<table>
+<thead>
+<tr><th>시각</th><th>의미</th></tr>
+</thead>
+<tbody>
+<tr><td>atime (접근 시각)</td><td>파일 데이터 접근과 관련됩니다. 마운트 정책에 따라 갱신을 줄일 수 있습니다.</td></tr>
+<tr><td>mtime (내용 수정 시각)</td><td>파일 데이터 쓰기 등 내용 변경과 관련됩니다.</td></tr>
+<tr><td>ctime (상태 변경 시각)</td><td>권한·소유권·링크 수 등 inode 상태 변경과 관련됩니다.</td></tr>
+</tbody>
+</table>
+<p>가장 흔한 오해는 ctime의 c를 creation으로 외우는 것입니다. <strong>ctime은 생성 시각이 아닙니다.</strong> <code>chmod</code>만 했는데 ctime이 바뀌었다면 새로 만들어진 파일이 아니라 같은 파일의 상태가 변경된 것입니다. 내용 쓰기는 일반적으로 mtime과 ctime 모두에 영향을 줍니다. atime은 <code>noatime</code>·<code>relatime</code> 같은 조건 때문에 읽을 때마다 증가한다고 가정할 수 없습니다. 파일시스템마다 시각을 저장하는 해상도도 다릅니다.</p>
+
+<h3>작업과 시간 속성의 변화</h3>
+<table>
+<thead>
+<tr><th>작업</th><th>시간 속성의 변화</th></tr>
+</thead>
+<tbody>
+<tr><td>파일 읽기</td><td>atime 갱신 여부는 마운트 정책 등의 영향을 받습니다.</td></tr>
+<tr><td>파일 내용 쓰기</td><td>일반적으로 mtime과 ctime을 갱신합니다.</td></tr>
+<tr><td><code>chmod</code></td><td>내용은 그대로여도 ctime을 갱신합니다. mtime은 유지됩니다.</td></tr>
+<tr><td><code>utimensat</code> / <code>futimens</code></td><td>atime과 mtime을 지정할 수 있습니다.</td></tr>
+</tbody>
+</table>
+<p>ctime은 이 API로 임의의 과거 시각을 직접 지정하지 않습니다. 또한 짧은 간격으로 일어난 두 작업은 시각 해상도 때문에 같은 숫자로 보일 수 있습니다. 표시된 값이 같다고 해서 작업이 일어나지 않았다고 판단하면 안 되며, 작업의 성공 여부는 반환값과 실제 권한으로 확인합니다. 이번 실습은 과거의 고정된 atime·mtime을 지정한 뒤 권한을 바꾸어 세 시각의 의미를 구분합니다.</p>
+
+<h3>futimens로 atime과 mtime 지정</h3>
+<pre><code>struct timespec ts[2] = {
+    {1704067200, 0},  /* atime: UTC 2024-01-01 */
+    {1704153600, 0}   /* mtime: UTC 2024-01-02 */
+};
+if (futimens(fd, ts) == -1) {
+    perror("futimens");
+    return 1;
+}
+
+/* ts[0]: atime, ts[1]: mtime */
+/* tv_nsec: UTIME_NOW / UTIME_OMIT도 가능 */</code></pre>
+<ul>
+<li><strong>FD 또는 경로</strong>: <code>futimens</code>는 FD를, <code>utimensat</code>은 경로를 기준으로 합니다. 헤더는 <code>&lt;sys/stat.h&gt;</code>입니다.</li>
+<li><strong>배열의 순서</strong>: <code>timespec</code> 배열의 첫 항목이 atime, 두 번째가 mtime입니다. ctime은 세 번째 항목으로 넣을 수 있는 값이 아닙니다.</li>
+<li><strong>특수 지정</strong>: <code>tv_nsec</code>에 <code>UTIME_NOW</code>를 넣으면 현재 시각, <code>UTIME_OMIT</code>을 넣으면 기존 값 유지입니다. 예를 들어 atime은 그대로 두고 mtime만 바꾸려면 atime 항목의 <code>tv_nsec</code>에 <code>UTIME_OMIT</code>을 씁니다.</li>
+<li><strong>권한 조건</strong>: 임의의 시각을 지정하는 것은 보통 파일 소유자나 특권이 필요합니다. 두 값을 지금 시각으로 갱신하는 경우와 임의 값을 지정하는 경우의 권한 조건은 서로 다릅니다.</li>
+</ul>
+<p>실습은 자신이 새로 만든 파일에 수행합니다. <code>utimensat</code>에 <code>AT_SYMLINK_NOFOLLOW</code>를 주면 마지막 링크 자체를 대상으로 삼을 수 있습니다. 완성 예제는 <a href="time_attrs.html">time_attrs</a>입니다.</p>
+
+<h3>실습 4: 시간 속성의 의미</h3>
+<pre><code>./time_attrs "$RUN/times.txt"
+./file_attr "$RUN/times.txt"
+
+# Ubuntu에서 이름과 시간을 함께 확인
+stat -c 'atime=%X mtime=%Y ctime=%Z' \
+  "$RUN/times.txt"
+
+# 프로그램의 두 출력 단계
+# after_futimens: atime과 mtime을 과거로 설정
+# after_fchmod:   권한만 0640으로 변경</code></pre>
+<p><a href="time_attrs.html">time_attrs</a>는 두 단계로 출력합니다. 첫 단계에서 atime과 mtime을 고정하고, 두 번째 단계에서는 권한만 바꿉니다.</p>
+<ul>
+<li><strong>고정한 시각</strong>: atime은 1704067200, mtime은 1704153600입니다.</li>
+<li><strong>권한 변경 후</strong>: <code>fchmod</code> 뒤에도 atime과 mtime이 그대로 유지되는지 확인합니다.</li>
+<li><strong>ctime 해석</strong>: ctime은 지금 일어난 상태 변경을 반영합니다. 과거의 파일 생성 시각으로 해석하지 않습니다.</li>
+</ul>
+<p>연속된 두 출력의 ctime이 같은 숫자여도 틀린 결과가 아닙니다. 또한 time_attrs는 파일 내용을 읽지 않고 <code>futimens</code>와 <code>fchmod</code> 뒤에 <code>fstat</code>만 수행하므로, 그 때문에 atime이 갱신되리라고 기대하지 않습니다. 이 실습의 핵심은 각 시각의 의미와, 변하지 않아야 할 값이 무엇인지입니다.</p>
+
+<h2>4부 이름과 열린 파일의 속성</h2>
+<p>마지막 주제는 이름과 열린 파일의 관계입니다. "이름이 사라졌다"는 사실과 "열린 객체를 더는 사용할 수 없다"는 사실은 같지 않습니다. 이름을 지운 뒤에도 열린 FD에서 속성을 조회해 봅니다.</p>
+
+<h3>unlink 이후의 fstat</h3>
+<ul>
+<li><strong>이름 삭제</strong>: <code>unlink</code>는 디렉토리에서 이름 하나를 제거합니다.</li>
+<li><strong>열린 참조</strong>: 마지막 하드 링크가 없어져도 열린 FD가 파일에 대한 참조를 유지할 수 있습니다.</li>
+<li><strong>관찰할 속성</strong>: <code>unlink</code> 전후로 같은 inode와 크기를 읽고, 하드 링크 수가 0이 된 것을 확인할 수 있습니다.</li>
+</ul>
+<p>하드 링크가 하나뿐인 파일을 <code>unlink</code>하면 링크 수는 0이 됩니다. 그 뒤로 경로를 통한 조회는 <code>ENOENT</code>로 실패하지만, 이미 열려 있는 FD를 통한 <code>fstat</code>과 읽기는 가능합니다. <code>st_nlink</code>는 파일을 열어 둔 FD의 개수가 아니라 파일을 가리키는 이름, 즉 하드 링크의 수입니다. 이름의 수와 열린 참조의 수는 같은 값이 아닙니다. 파일의 공간이 최종적으로 회수되려면 열린 참조를 포함한 파일 수명 조건이 모두 해소되어야 합니다.</p>
+
+<h3>실습 5: 이름 삭제 후 속성 조회</h3>
+<pre><code>./fd_unlink_demo
+
+# 프로그램 내부의 실행 순서
+# mkstemp: 전용 임시 파일 생성
+# write:   "hello" 5바이트 기록
+# fstat:   inode, links=1, size=5 출력
+# unlink:  방금 만든 이름 제거
+# fstat:   같은 inode, links=0, size=5
+# read:    열린 FD로 "hello" 읽기
+# close:   열린 참조 정리</code></pre>
+<ul>
+<li><strong>전용 임시 파일</strong>: <a href="fd_unlink_demo.html">fd_unlink_demo</a>는 명령 인자를 받지 않고, <code>mkstemp</code>로 만든 자기 임시 파일만 대상으로 생성·삭제합니다. 다른 파일을 건드리지 않습니다.</li>
+<li><strong>속성 비교</strong>: before와 after의 inode와 크기가 같은지, 링크 수가 1에서 0으로 바뀌는지 비교합니다.</li>
+<li><strong>결과 설명</strong>: 이름이 없는데도 마지막 <code>read</code>에서 <code>hello</code>가 나오는 이유를, 이름의 존재와 열린 객체의 수명을 구별해서 설명합니다. 열린 FD가 같은 파일을 계속 참조하고 있기 때문에 내용을 읽을 수 있습니다.</li>
+</ul>
+<p>프로그램이 출력한 임시 경로가 정상 종료 뒤에 남아 있지 않은지도 확인합니다. 이 설명은 Linux 로컬 파일시스템을 기준으로 하며, NFS 같은 특수한 환경은 별도의 해석이 필요합니다.</p>
+
+<h2>확인 문제</h2>
+<p>값만 답하지 말고 어떤 대상을 조회했고 어떤 비트를 보았는지 함께 설명해 봅니다.</p>
+<ol>
+<li><strong>깨진 심볼릭 링크에서 <code>stat</code>과 <code>lstat</code>은 어떻게 다른가?</strong> — <code>stat</code>은 없는 대상을 따라가다 실패하고, <code>lstat</code>은 링크 자체를 조회합니다.</li>
+<li><strong><code>st_mode</code> 전체를 <code>0644</code>와 직접 비교하면 왜 안 되는가?</strong> — <code>st_mode</code>에는 종류와 특수 비트도 포함되므로 목적에 맞는 마스크가 필요합니다.</li>
+<li><strong>기본 ACL이 없을 때 <code>0666</code>과 umask <code>0027</code>의 결과는?</strong> — <code>0640</code>입니다.</li>
+<li><strong><code>chmod</code>로 ctime이 바뀌면 파일 내용도 바뀐 것인가?</strong> — 아닙니다. ctime은 상태 변경 시각입니다.</li>
+<li><strong><code>unlink</code> 뒤 <code>fstat</code>에서 links=0이 나와도 읽을 수 있는 이유는?</strong> — 열린 FD가 참조를 유지하기 때문입니다.</li>
+</ol>
+
+<h2>정리</h2>
+<ul>
+<li><a href="file_attr.html">file_attr</a>가 출력하는 필드를 종류·권한·소유권·크기·시간으로 나누어 설명할 수 있어야 합니다.</li>
+<li>링크 종류(하드 링크, 심볼릭 링크, 깨진 링크)에 따른 조회 결과와 실패하는 경로를 기록합니다.</li>
+<li><code>umask</code>와 <code>chmod</code> 전후의 권한 변화를 비교합니다. umask는 생성 시점에, chmod는 이미 있는 파일에 적용됩니다.</li>
+<li>논리적 크기와 할당 공간, mtime과 ctime을 구별합니다.</li>
+<li>제출물은 C 소스, <code>REPORT.md</code>, 실행 로그입니다. inode 번호나 할당 블록 수를 다른 사람과 같게 만들 필요는 없으며, 작업 전후의 관계를 설명하는 것이 중요합니다.</li>
+<li>선택 확장 과제는 이전 시간의 mini_ls에 파일 속성 열(rwx 문자열, UID/GID, 크기, mtime)을 추가하는 것입니다. 재귀 탐색 등으로 범위를 넓히지 않고 파일 속성 해석에 집중합니다.</li>
+</ul>
+<p>새 API를 읽을 때는 함수 이름과 예제만 보지 말고 대상, 반환값, 자료형, 권한 조건과 실패 조건을 함께 확인합니다.</p>

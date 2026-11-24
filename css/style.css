@@ -168,6 +168,45 @@ pre.code .ln::before {
 .cards strong { display: block; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 14px; color: var(--accent); }
 .cards span { display: block; font-size: 14px; color: var(--muted); margin-top: 2px; }
 
+/* ---- lecture notes on class pages ---- */
+
+.notes {
+  max-width: 860px;
+  margin-top: 8px;
+  padding: 8px 28px 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 16px;
+  line-height: 1.75;
+  overflow-wrap: break-word;
+}
+.notes h2 { font-size: 21px; margin: 32px 0 10px; padding-top: 20px; border-top: 1px solid var(--border); }
+.notes > h2:first-child, .notes > p:first-child + h2 { border-top: 0; padding-top: 0; }
+.notes h3 { font-size: 17px; margin: 24px 0 6px; }
+.notes p { margin: 10px 0; }
+.notes ul, .notes ol { margin: 10px 0; padding-left: 24px; }
+.notes li { margin: 4px 0; }
+.notes pre {
+  margin: 12px 0;
+  padding: 12px 14px;
+  background: var(--code-bg);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.notes pre code { background: none; padding: 0; font-size: inherit; }
+.notes code { font-size: 14px; }
+.notes blockquote { margin: 12px 0; padding: 2px 16px; border-left: 3px solid var(--border); color: var(--muted); }
+.notes table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+.notes th, .notes td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+.notes th { background: var(--code-bg); font-weight: 600; white-space: nowrap; }
+
+@media (max-width: 600px) {
+  .notes { padding: 4px 16px 16px; }
+}
+
 .chips { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .chips a {
   display: block;

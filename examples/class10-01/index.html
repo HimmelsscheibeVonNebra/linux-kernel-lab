@@ -13,15 +13,461 @@
     <p>fork로 프로세스를 만들고 exec로 프로그램을 교체하며 wait·waitpid로 종료 상태를 회수하는 흐름과 atexit·stdio 버퍼의 동작을 다룬다.</p>
   </header>
   <main class="list">
-    <ul class="cards">
-      <li><a href="fork.html"><strong>fork</strong><span>fork가 한 번 호출되어 부모(자식 PID 반환)와 자식(0 반환)에서 두 번 반환되는 것을 getpid·getppid 출력으로 확인한다.</span></a></li>
-      <li><a href="execlp.html"><strong>execlp</strong><span>execlp가 PATH에서 ls를 찾아 현재 프로세스를 교체하므로 성공하면 exec 뒤의 코드는 실행되지 않고, 실패할 때만 -1로 돌아옴을 보여 준다.</span></a></li>
-      <li><a href="execv.html"><strong>execv</strong><span>execv에 실행 파일 경로(/bin/ls)와 인자 배열을 직접 넘겨 프로세스를 교체한다. PATH 탐색이 없다는 점이 execlp와 다르다.</span></a></li>
-      <li><a href="forkNexec.html"><strong>forkNexec</strong><span>fork한 자식에서 execlp로 ls를 실행하는, 셸이 명령을 실행하는 방식(fork + exec)을 보여 준다. 부모는 기다리지 않고 끝난다.</span></a></li>
-      <li><a href="wait.html"><strong>wait</strong><span>자식이 exit(2)로 끝나면 부모가 wait로 회수해 status(512 = 0x200)와 WEXITSTATUS(2)를 출력한다.</span></a></li>
-      <li><a href="waitpid.html"><strong>waitpid</strong><span>자식이 3초 자는 동안 부모가 waitpid(WNOHANG)로 1초마다 찔러 보고(0 반환), 자식이 끝나면 종료 코드 3을 회수한다.</span></a></li>
-      <li><a href="atexit.html"><strong>atexit</strong><span>atexit로 등록한 정리 함수가 exit 호출 시 등록의 역순으로 실행됨을 보여 준다.</span></a></li>
-    </ul>
+    <section>
+      <h2>실행해 볼 예제</h2>
+      <ul class="cards">
+        <li><a href="fork.html"><strong>fork</strong><span>fork가 한 번 호출되어 부모(자식 PID 반환)와 자식(0 반환)에서 두 번 반환되는 것을 getpid·getppid 출력으로 확인한다.</span></a></li>
+        <li><a href="execlp.html"><strong>execlp</strong><span>execlp가 PATH에서 ls를 찾아 현재 프로세스를 교체하므로 성공하면 exec 뒤의 코드는 실행되지 않고, 실패할 때만 -1로 돌아옴을 보여 준다.</span></a></li>
+        <li><a href="execv.html"><strong>execv</strong><span>execv에 실행 파일 경로(/bin/ls)와 인자 배열을 직접 넘겨 프로세스를 교체한다. PATH 탐색이 없다는 점이 execlp와 다르다.</span></a></li>
+        <li><a href="forkNexec.html"><strong>forkNexec</strong><span>fork한 자식에서 execlp로 ls를 실행하는, 셸이 명령을 실행하는 방식(fork + exec)을 보여 준다. 부모는 기다리지 않고 끝난다.</span></a></li>
+        <li><a href="wait.html"><strong>wait</strong><span>자식이 exit(2)로 끝나면 부모가 wait로 회수해 status(512 = 0x200)와 WEXITSTATUS(2)를 출력한다.</span></a></li>
+        <li><a href="waitpid.html"><strong>waitpid</strong><span>자식이 3초 자는 동안 부모가 waitpid(WNOHANG)로 1초마다 찔러 보고(0 반환), 자식이 끝나면 종료 코드 3을 회수한다.</span></a></li>
+        <li><a href="atexit.html"><strong>atexit</strong><span>atexit로 등록한 정리 함수가 exit 호출 시 등록의 역순으로 실행됨을 보여 준다.</span></a></li>
+      </ul>
+    </section>
+    <article class="notes">
+<p>이번 시간의 질문은 "새 프로세스(<code>fork</code>)와 새 프로그램(<code>exec</code>)은 어떻게 다른가"입니다. 1부에서 exec 가족으로 프로그램을 교체하고 <code>fork</code>로 프로세스를 복제한 뒤 둘을 합치고, 2부에서 프로세스가 끝나는 과정(<code>exit</code>, <code>_exit</code>, <code>atexit</code>)을, 3부에서 부모가 자식의 끝을 기다리고 회수하는 방법(<code>wait</code>, <code>waitpid</code>, status 매크로)을 봅니다. 수업 내내 반복하는 동작은 하나입니다. 프로그램이 <code>printf</code>로 스스로 보고한 값을 <code>ps</code>, <code>strace</code>, <code>$?</code>가 밖에서 보여 주는 값과 맞춰 보는 것입니다. PID 같은 값은 실행할 때마다 달라집니다.</p>
+
+<h2>들어가기</h2>
+
+<h3>지난 시간과의 연결</h3>
+<p>9주차의 <code>exit_how</code>, <code>chld_reap</code>, <code>usr_round</code>는 <code>fork</code>, <code>waitpid</code>, <code>pipe</code>를 "관찰 도구"로만 썼습니다. 그때 설명 없이 지나간 것들이 오늘 정식으로 다뤄집니다.</p>
+<ul>
+<li>원시 status 값에서 상위 바이트가 종료 코드이고 하위 7비트가 시그널이라는 배치는 3부에서 정식 계약으로 다룹니다.</li>
+<li><code>SIGCHLD</code>가 오면 <code>waitpid(WNOHANG)</code> 루프로 자식을 수거했습니다. 왜 <code>WNOHANG</code>이어야 하는지의 답이 오늘 나옵니다.</li>
+<li>exec 뒤의 시그널 처분은 <code>SIG_IGN</code>은 유지되고 핸들러는 초기화된다고 했습니다. 이것은 "exec가 무엇을 바꾸고 무엇을 남기는가"라는 더 큰 규칙의 한 줄입니다.</li>
+</ul>
+
+<h3>예제 일곱 개</h3>
+<table>
+<thead><tr><th>예제</th><th>보여 주는 것</th></tr></thead>
+<tbody>
+<tr><td><a href="fork.html">fork</a></td><td><code>fork</code> 한 번에 반환값 둘 — PID와 PPID 출력</td></tr>
+<tr><td><a href="execlp.html">execlp</a></td><td>PATH에서 <code>ls</code>를 찾아 교체 (인자 나열)</td></tr>
+<tr><td><a href="execv.html">execv</a></td><td><code>/bin/ls</code>를 경로로 교체 (인자 배열)</td></tr>
+<tr><td><a href="forkNexec.html">forkNexec</a></td><td>자식만 <code>ls</code>로 바꾸고 부모는 계속</td></tr>
+<tr><td><a href="wait.html">wait</a></td><td>자식 <code>exit(2)</code> → 부모 <code>wait</code> → status 해석</td></tr>
+<tr><td><a href="waitpid.html">waitpid</a></td><td><code>WNOHANG</code>으로 1초마다 찔러 보기</td></tr>
+<tr><td><a href="atexit.html">atexit</a></td><td>종료 처리기 두 개의 호출 순서</td></tr>
+</tbody>
+</table>
+<p>일곱 예제는 Ubuntu(gcc)와 macOS(clang) 양쪽에서 경고 없이 빌드됩니다.</p>
+<pre><code>$ make                   # -std=c11 -Wall -Wextra -Wpedantic -Werror
+$ make check             # python3 test_examples.py (8회 실행)</code></pre>
+
+<h3>새 프로그램 실행과 새 프로세스 생성</h3>
+<p>새로운 프로세스를 실행하는 방법은 크게 두 가지, 새 프로그램 실행과 새 프로세스 생성입니다. 둘은 이름이 비슷하지만 바뀌는 것이 정반대입니다.</p>
+<ul>
+<li><strong>exec = 교체.</strong> 같은 PID 안에서 프로그램만 바뀝니다. 프로세스 A가 <code>execlp("ls")</code>를 부르면 PID는 그대로인 채 프로그램이 <code>ls</code>가 되고, 기존 코드는 더 실행되지 않습니다. 결과는 "같은 PID, 다른 프로그램"입니다.</li>
+<li><strong>fork = 복제.</strong> 부모의 사본이 새 PID로 생깁니다. 부모와 자식은 독립적으로 같은 코드를 이어 갑니다. 결과는 "다른 PID, 같은 프로그램"입니다.</li>
+</ul>
+<p>둘을 합치면, <code>fork</code>로 자식을 만들고 자식만 exec를 해서 "내 일을 계속하면서 다른 프로그램도 돌리는" 구조가 됩니다. 셸이 <code>ls</code>를 실행하는 구조가 바로 이것입니다.</p>
+
+<h2>1부 생성과 실행</h2>
+
+<h3>exec: 바이너리를 읽어 내 메모리에 덮어쓴다</h3>
+<p><code>execlp("ls", …)</code>를 부르면 결국 <code>execve</code> 시스템 호출이 일어나고, 커널이 <code>ls</code> 바이너리를 읽어 지금 프로세스의 메모리에 적재합니다. 코드, 데이터, 힙, 스택이 모두 새로 만들어지고(스택에는 새 <code>argv</code>와 <code>envp</code>가 놓입니다), 기존 프로그램은 거기서 멈춥니다.</p>
+<p>그래서 exec는 <strong>성공하면 돌아오지 않습니다.</strong> exec 다음 줄에 써 둔 "After exec" 출력은 새 프로그램 어디에도 없으므로 영원히 찍히지 않습니다. exec가 돌아오는 경우는 실패뿐이며, 이때 -1을 반환하고 <code>errno</code>에 <code>ENOENT</code>, <code>EACCES</code>, <code>E2BIG</code> 같은 원인이 들어갑니다.</p>
+<p>무엇이 남고 무엇이 새로 만들어지는지는 다음과 같이 나뉩니다.</p>
+<ul>
+<li><strong>유지되는 것:</strong> PID와 PPID, 열린 fd 표, 현재 작업 디렉터리(cwd), umask, 환경, <code>SIG_IGN</code> 처분. 9주차에 본 "SIG_IGN은 유지"가 이 목록의 한 항목입니다.</li>
+<li><strong>새로 만드는 것:</strong> 코드, 데이터, 힙, 스택. 시그널 핸들러는 <code>SIG_DFL</code>로 돌아가고(핸들러 함수가 있던 코드가 사라졌기 때문입니다), stdio 버퍼도 사라집니다. exec 전에 버퍼에 "--&gt; Before …"가 들어 있었더라도 교체 뒤의 버퍼는 비어 있습니다. 이 마지막 항목이 뒤에서 보는 "사라진 줄"의 원인입니다.</li>
+</ul>
+
+<h3>exec 가족 여섯: l·v, p, e</h3>
+<table>
+<thead><tr><th>함수</th><th>인자 전달</th><th>찾기</th><th>환경</th></tr></thead>
+<tbody>
+<tr><td><code>execl(path, arg0, …, NULL)</code></td><td>나열</td><td>경로</td><td>상속</td></tr>
+<tr><td><code>execlp(file, arg0, …, NULL)</code></td><td>나열</td><td>PATH</td><td>상속</td></tr>
+<tr><td><code>execle(path, arg0, …, NULL, envp)</code></td><td>나열</td><td>경로</td><td>envp</td></tr>
+<tr><td><code>execv(path, argv)</code></td><td>배열</td><td>경로</td><td>상속</td></tr>
+<tr><td><code>execvp(file, argv)</code></td><td>배열</td><td>PATH</td><td>상속</td></tr>
+<tr><td><code>execvpe(file, argv, envp)</code></td><td>배열</td><td>PATH</td><td>envp</td></tr>
+</tbody>
+</table>
+<p>이름은 규칙대로 읽으면 됩니다. l은 list, v는 vector, p는 PATH 검색, e는 envp 지정입니다.</p>
+<ul>
+<li><strong>l과 v:</strong> l은 인자를 하나씩 나열하고 마지막에 <code>(char *)NULL</code>을 둡니다. v는 <code>char *argv[]</code> 배열로 넘깁니다.</li>
+<li><strong>p:</strong> 경로 대신 파일 이름을 받아, 셸처럼 PATH의 디렉터리를 차례로 찾습니다. 뒤의 strace 관찰에서 이 탐색이 실제로 보입니다.</li>
+<li><strong>e:</strong> <code>envp</code>로 환경을 직접 넘깁니다. e가 없으면 현재의 <code>environ</code>을 그대로 물려줍니다.</li>
+</ul>
+<p>여섯 개는 모두 라이브러리 함수이고, 시스템 호출은 <code>execve(path, argv, envp)</code> 하나입니다. 여섯 모두 결국 이 한 호출로 모입니다. <code>execvpe</code>는 GNU 확장이라 <code>_GNU_SOURCE</code>가 필요합니다.</p>
+
+<h3>execlp.c와 execv.c: 같은 ls -a, 두 가지 호출</h3>
+<p><a href="execlp.html">execlp</a>와 <a href="execv.html">execv</a>는 둘 다 <code>ls -a</code>가 되는 프로그램이고, 인자를 전달하는 방식만 다릅니다.</p>
+<pre><code>/* execlp.c */
+printf("--&gt; Before exec function\n");
+if (execlp("ls", "ls", "-a", (char *)NULL) == -1) {
+    perror("execlp");
+    exit(1);
+}
+printf("--&gt; After exec function\n");   /* 도달하지 못한다 */
+
+/* execv.c */
+char *argv[3];
+argv[0] = "ls"; argv[1] = "-a"; argv[2] = NULL;
+if (execv("/bin/ls", argv) == -1) {
+    perror("execv");
+    exit(1);
+}</code></pre>
+<ul>
+<li><strong><code>ls</code>를 두 번 쓰는 이유:</strong> 첫 <code>"ls"</code>는 PATH에서 찾을 파일이고, 둘째 <code>"ls"</code>는 새 프로그램이 받을 <code>argv[0]</code>, 곧 프로그램 이름입니다.</li>
+<li><strong>NULL 종결:</strong> 인자가 어디서 끝나는지 알리는 표시입니다. 빠뜨리면 미정의 동작입니다. 배열로 넘기는 <code>execv</code>에서도 끝 표시는 똑같이 <code>NULL</code>입니다.</li>
+<li><strong>-1 검사:</strong> exec는 실패했을 때만 돌아오므로, <code>== -1</code> 검사와 그 안의 <code>perror</code>, <code>exit</code>가 실패 경로의 전부입니다.</li>
+<li><code>execv</code>에는 p가 없으므로 <code>/bin/ls</code>라는 전체 경로를 주어야 하고, e가 없으므로 환경은 현재 것을 물려줍니다.</li>
+</ul>
+<p>실행하면 "Before" 줄 다음에 <code>ls -a</code>의 결과가 나오고 "After"는 없습니다. <code>printf</code> 다음의 <code>execlp</code>가 성공해 프로세스가 <code>ls</code>가 됐기 때문입니다. 화면에 보이는 파일 목록은 우리 프로그램의 출력이 아니라 <code>ls</code>가 같은 PID에서 찍은 것이고, 두 프로그램 모두 <code>ls</code>의 종료 상태 0으로 끝납니다.</p>
+
+<h3>exec의 두 경계: 파이프에서 사라진 줄, 실패 시 반환</h3>
+<p>같은 <code>printf</code>가 터미널, 파이프, 실패 경로에서 서로 다르게 보입니다.</p>
+<ul>
+<li><strong>파이프(<code>./execlp | head -3</code>):</strong> "Before" 줄이 사라집니다. 출력이 파이프로 가면 완전 버퍼링이 되어 그 줄은 버퍼에만 있었고, exec가 버퍼째 버렸습니다.</li>
+<li><strong>실패(<code>PATH=/nonexistent ./execlp</code>):</strong> <code>ls</code>를 찾지 못해 <code>execlp</code>가 -1로 돌아옵니다. <code>perror</code> 뒤 <code>exit(1)</code>로 끝나므로 종료 상태는 1입니다. 그리고 이번에는 "Before"가 보입니다. exec가 실패해 프로세스가 살아남았고, <code>exit(1)</code>이 버퍼를 비웠기 때문입니다.</li>
+</ul>
+
+<h3>왜 "Before" 줄이 사라졌나: stdio 버퍼와 exec</h3>
+<p><code>printf</code>는 곧바로 화면에 쓰지 않고 먼저 사용자 공간의 stdio 버퍼에 넣습니다. 그 버퍼가 언제 <code>write</code>로 나가는지는 출력 대상에 따라 다릅니다. <code>stdout</code>은 터미널이면 줄 버퍼, 아니면 완전 버퍼(기본 4096바이트)입니다.</p>
+<ul>
+<li><strong>터미널(줄 버퍼):</strong> <code>"Before\n"</code>의 <code>\n</code>에서 즉시 <code>write</code>되어 화면에 나옵니다. <code>execve</code>가 일어날 때 버퍼는 이미 비어 있었습니다.</li>
+<li><strong>파이프·파일(완전 버퍼):</strong> 버퍼가 가득 차거나 프로그램이 종료할 때 <code>write</code>합니다. <code>"Before\n"</code>은 4096바이트를 채우지 못해 버퍼에만 머물렀고, 그 상태에서 <code>execve</code>가 일어났습니다. exec는 사용자 공간을 통째로 바꾸므로 아직 <code>write</code>되지 않은 버퍼도 함께 없어집니다. 화면에는 아무것도 남지 않습니다.</li>
+</ul>
+<p>exec가 실패한 경로에서는 프로세스가 살아서 <code>exit</code>에 도달하고, <code>exit</code>가 버퍼를 flush하므로 그제야 "Before"가 보입니다. <code>stderr</code>는 버퍼가 없어서, <code>perror</code>의 메시지가 "Before"보다 먼저 보이는 것도 같은 이유로 설명됩니다.</p>
+<p>여기서 규칙이 나옵니다. <strong>fork·exec 직전에 <code>fflush(NULL)</code></strong>을 하거나, <code>setvbuf(stdout, NULL, _IONBF, 0)</code>으로 버퍼링을 끕니다. 9주차 <code>exit_how</code>가 flush를 했던 것이 바로 이 이유였습니다. 같은 규칙이 <code>fork</code>에도 적용되는데, 그쪽에서는 버퍼가 사라지는 것이 아니라 복제되어 자식이 <code>exit</code>할 때 또 비워지는 문제가 됩니다. 2부의 끝에서 다룹니다.</p>
+
+<h3>fork: 한 번 호출, 두 번 반환</h3>
+<p><code>pid = fork();</code>를 부르면 커널이 자식의 PCB를 만들고 메모리 사본을 준비하고 자식 PID를 배정합니다. 그 뒤 같은 호출이 부모와 자식 두 프로세스에서 각각 반환되고, <strong>반환값이 역할을 나눕니다.</strong></p>
+<ul>
+<li>0보다 크면 부모입니다. 값은 자식의 PID입니다.</li>
+<li>0이면 자식입니다.</li>
+<li>-1이면 실패입니다. 자식은 생기지 않았고 부모에게만 -1이 돌아오며 <code>errno</code>(<code>EAGAIN</code>, <code>ENOMEM</code>)가 설정됩니다.</li>
+</ul>
+<p>같은 코드가 두 프로세스에서 이어지고 반환값만 다릅니다. <code>fork</code> 다음 줄부터는 둘 다 실행하므로, 분기 밖에 있는 "End of fork" 출력은 두 번 찍힙니다. 자식은 반환값으로 0을 받을 뿐 부모의 PID를 받지 못하므로, 부모가 누구인지는 <code>getppid()</code>로 알아냅니다.</p>
+
+<h3>복제되는 것, 새로 받는 것, 공유하는 것</h3>
+<p>"메모리에 있는 정보는 복사되고, 프로세스를 관리하는 정보는 복사되지 않는다"는 것이 큰 줄기입니다.</p>
+<table>
+<thead><tr><th>복제된다 (사본)</th><th>새로 받는다</th><th>공유한다</th></tr></thead>
+<tbody>
+<tr><td>코드·데이터·힙·스택 (쓸 때 복사: COW)<br>환경 변수·cwd·umask<br>열린 fd 표 (번호표)<br>시그널 처분·마스크<br>자원 한도·UID·GID<br>stdio 버퍼·atexit 등록</td><td>PID (새 번호)<br>PPID (= 부모 PID)<br>보류 시그널: 비움<br>실행 시간 통계: 0<br>자원 사용량: 0<br>파일 잠금: 없음<br>자식 목록: 비움</td><td>열린 파일 설명 (open file description)<br>→ 파일 offset 공유<br>→ 상태 플래그 공유<br>텍스트(코드) 페이지는 읽기 전용으로 공유</td></tr>
+</tbody>
+</table>
+<ul>
+<li><strong>메모리는 사본입니다.</strong> copy-on-write 방식이라 쓰는 순간에 페이지가 갈라집니다. 한쪽이 변수를 바꿔도 상대는 모릅니다.</li>
+<li><strong>fd는 사본이지만 파일 설명은 공유합니다.</strong> fd 번호표는 복사되지만 두 번호표가 같은 열린 파일을 가리키므로 파일 offset을 공유합니다. 이것이 12주차에 다룰 <code>dup2</code>와 파이프의 바탕입니다.</li>
+<li><strong>새로 받는 것:</strong> PID와 PPID, 비워진 보류 시그널, 0에서 시작하는 시간 통계입니다. 그리고 자식은 부모의 자식 목록에 추가됩니다.</li>
+</ul>
+<p>stdio 버퍼와 atexit 등록이 "복제된다" 쪽에 들어 있다는 점을 기억해 두십시오. 2부의 함정이 여기서 나옵니다.</p>
+
+<h3>fork.c: switch (pid = fork()) 세 갈래</h3>
+<p><a href="fork.html">fork</a> 예제는 대입과 분기를 한 줄에 쓴 <code>switch (pid = fork())</code>로 세 갈래를 나눕니다. 반환값이 세 갈래의 열쇠입니다.</p>
+<pre><code>switch (pid = fork()) {
+    case -1 :  /* fork failed */
+        perror("fork");
+        exit(1);
+    case 0 :   /* child process */
+        printf("Child Process - My PID:%d, My Parent's PID:%d\n",
+               (int)getpid(), (int)getppid());
+        break;
+    default :  /* parent process */
+        printf("Parent process - My PID:%d, My Parent's PID:%d, "
+               "My Child's PID:%d\n",
+               (int)getpid(), (int)getppid(), (int)pid);
+        break;
+}
+printf("End of fork\n");</code></pre>
+<ul>
+<li><strong>-1 (실패):</strong> <code>perror</code> 뒤 <code>exit(1)</code>입니다. 자식은 생기지 않았고 부모만 이 가지로 옵니다. 원본 소스에는 <code>exit(1)</code> 뒤에 <code>break</code>가 있는데, <code>exit</code> 뒤라 닿지 않는 관습적인 줄입니다.</li>
+<li><strong>0 (자식):</strong> 자기 PID와, <code>getppid()</code>로 얻은 부모 PID를 찍습니다.</li>
+<li><strong>양수 (부모):</strong> 반환값을 담은 <code>pid</code> 변수가 곧 자식의 PID입니다. 자기 부모(셸)의 PID도 함께 찍어 사슬을 보여 줍니다.</li>
+<li><code>(int)</code> 캐스팅은 <code>pid_t</code>의 크기가 구현마다 달라서 <code>%d</code>에 맞추는 관습입니다. <code>pid_t</code>는 <code>sys/types.h</code>에, <code>fork</code>·<code>getpid</code>·<code>getppid</code>는 <code>unistd.h</code>에 있습니다.</li>
+<li>"End of fork"는 <code>switch</code> 밖이라 두 프로세스가 모두 실행합니다.</li>
+</ul>
+
+<h3>fork 실행: PID 사슬과 두 번의 End of fork</h3>
+<p>강의의 실행 화면에서는 셸(206)이 <code>fork</code>로 220을 만들고, 220이 <code>fork</code>로 221을 만들었습니다. 부모가 찍은 PPID는 셸에서 <code>echo $$</code>로 본 값과 같습니다. 같은 프로그램을 두 번 실행했더니 자식이 찍은 PPID가 달랐습니다.</p>
+<ul>
+<li><strong>첫 실행의 PPID는 1:</strong> 자식이 <code>getppid()</code>를 부르기 전에 부모가 먼저 끝나서, 자식이 PID 1에게 입양된 뒤였습니다(7주차의 고아 프로세스).</li>
+<li><strong>둘째 실행의 PPID는 222:</strong> 이번에는 자식이 실행될 때 부모가 살아 있었습니다.</li>
+</ul>
+<p>"End of fork"는 매번 두 번 나옵니다. 두 결과는 모두 정상입니다.</p>
+
+<h3>실행 순서는 스케줄러가 정한다</h3>
+<p><code>fork</code> 직후 두 프로세스는 같은 실행 큐에 놓이고, 누가 먼저 CPU를 받을지는 정해진 바가 없습니다. 코어가 여럿이면 동시에 실행됩니다. 둘은 서로 독립적으로, 동시에 실행된다고 보아야 합니다.</p>
+<ul>
+<li><strong>부모가 먼저 끝난 경우(첫 실행):</strong> 부모 220이 "Parent process"와 "End of fork"를 찍고 종료 → 자식 221의 <code>getppid()</code>는 입양된 뒤라 1 → 자식의 "End of fork".</li>
+<li><strong>자식이 먼저 실행된 경우(둘째 실행):</strong> 자식 223의 <code>getppid()</code>는 222(부모가 살아 있음) → 자식의 "End of fork" → 부모 222의 "Parent process"와 "End of fork".</li>
+</ul>
+<p>출력이 섞이는 이유는 두 프로세스의 <code>write</code>가 한 터미널로 모이기 때문이며, 9주차 <code>usr_round</code>에서도 본 현상입니다. 순서가 필요하면 부모가 <code>wait</code>로 자식의 끝을 기다리거나(3부), 파이프나 시그널로 신호를 주고받아야 합니다.</p>
+
+<h3>fork + exec: 셸이 명령을 실행하는 방법</h3>
+<p>"내 것을 하는 중에 잠깐 다른 프로그램을 실행하고 싶다"면 <code>fork</code> 뒤 자식에서 exec를 합니다. 부모는 자기 코드를 이어 가고 자식만 새 프로그램이 됩니다. 셸은 이것을 반복하는 fork·exec·wait 루프입니다. <code>ls -a</code>라는 명령을 읽으면 bash가 <code>fork</code>하고, 자식이 (설정 단계를 거쳐) <code>execvp("ls", argv)</code>를 하고, bash는 <code>waitpid(pid, &amp;st, 0)</code>으로 기다립니다. 자식이 끝나면 그 종료 상태가 <code>$?</code>(= <code>WEXITSTATUS</code>)가 되고 프롬프트가 다시 나옵니다.</p>
+<ul>
+<li><code>forkNexec.c</code> = fork + (자식) execlp — wait가 없어서 부모가 먼저 끝날 수 있습니다.</li>
+<li>bash = fork + (자식) execvp + waitpid — 자식이 끝나야 프롬프트가 나옵니다.</li>
+</ul>
+<p>정리하면 새 프로세스(fork) + 새 프로그램(exec) + 끝 기다리기(wait) = 명령 실행입니다.</p>
+
+<h3>forkNexec.c: 자식만 ls가 된다</h3>
+<p><a href="forkNexec.html">forkNexec</a>는 <code>fork.c</code>와 같은 <code>switch</code>로 역할을 나누고, 자식 가지에서만 exec를 합니다.</p>
+<pre><code>case 0 :    /* child process */
+    printf("--&gt; Child Process\n");
+    if (execlp("ls", "ls", "-a", (char *)NULL) == -1) {
+        perror("execlp");
+        exit(1);
+    }
+    exit(0);       /* exec가 성공하면 도달하지 않는다 */
+default :   /* parent process */
+    printf("--&gt; Parent process - My PID:%d\n", (int)getpid());
+    break;
+}
+return 0;          /* 부모는 기다리지 않고 끝난다 */</code></pre>
+<ul>
+<li><strong>자식 가지:</strong> <code>printf</code> 뒤 <code>execlp</code>입니다. 실패하면 <code>perror</code>와 <code>exit(1)</code>, 성공하면 그 아래 줄은 영영 실행되지 않습니다.</li>
+<li><strong><code>exit(0)</code>이 있는 이유:</strong> exec가 성공하면 도달할 수 없는 줄이지만, 실패 경로의 자식이 <code>switch</code>를 빠져나가 부모 코드로 흘러가지 않게 막는 울타리입니다.</li>
+<li><strong>부모 가지:</strong> PID를 찍고 <code>return</code>합니다. 이 소스에는 <code>sys/wait.h</code>조차 없습니다. 기다리지 않으니 부모가 자식보다 먼저 끝날 수 있고, 그러면 자식은 고아가 됩니다.</li>
+</ul>
+<p>실제 실행에서 그 결과가 보입니다. 첫 실행에서는 부모가 PID를 찍고 끝나 프롬프트가 먼저 나왔고, <code>ls</code>의 출력이 그 뒤에 찍혔습니다. 프롬프트 뒤에 찍힌 목록은 고아가 된 <code>ls</code>의 출력입니다. 부모 없이 남은 자식은 PID 1에게 입양되어 끝까지 실행하고, 셸은 그 존재를 모릅니다. Enter를 치면 프롬프트가 다시 나옵니다. 또 출력을 <code>| head</code>로 파이프에 연결하면 "--&gt; Child Process" 줄이 사라지는데, 앞에서 본 버퍼 규칙 그대로입니다.</p>
+
+<h3>strace로 본 fork·exec: clone과 네 번의 execve</h3>
+<p><code>strace -f -e trace=%process</code>로 <code>forkNexec</code>를 추적하면 프로세스 관리 호출(<code>clone</code>, <code>execve</code>, <code>wait4</code>, <code>exit_group</code>)만 볼 수 있습니다. <code>-f</code>는 자식까지 추적하라는 옵션입니다.</p>
+<ul>
+<li><strong><code>clone(… SIGCHLD)</code>:</strong> <code>fork</code>는 리눅스에서 <code>clone</code> 호출로 나타납니다. 반환값으로 자식의 PID를 돌려받습니다.</li>
+<li><strong><code>execve</code> 네 번:</strong> <code>execlp</code>의 p가 하는 일입니다. PATH의 디렉터리를 차례로 <code>execve</code>해 보다가 <code>/usr/bin/ls</code>에서 성공(= 0)했습니다.</li>
+<li><strong><code>exit_group</code> 순서:</strong> 부모(270)가 먼저 <code>exit_group</code>을 했고, 자식(271)은 <code>ls</code>를 다 마치고 나중에 끝났습니다. 프롬프트가 먼저 돌아온 관찰과 같은 사실입니다.</li>
+</ul>
+
+<h3>왜 fork와 exec는 둘로 나뉘어 있나</h3>
+<p><code>fork</code> 뒤, exec 전의 자식은 아직 부모의 코드를 실행하고 있습니다. 이 틈이 <strong>자식 설정 단계</strong>입니다. 자식은 부모가 써 둔 평범한 C 코드로 자기 환경을 자기 손으로 바꾼 다음 exec를 합니다.</p>
+<ul>
+<li><code>open</code> + <code>dup2</code>: 출력 리다이렉션</li>
+<li>시그널 처분 복원 (<code>SIG_IGN</code> → <code>SIG_DFL</code>)</li>
+<li><code>chdir</code>, <code>umask</code>, <code>nice</code>(우선순위)</li>
+<li>물려줄 필요 없는 fd 닫기 (<code>FD_CLOEXEC</code>)</li>
+</ul>
+<p>exec된 프로그램은 "누가 어떻게 준비했는지" 몰라도 됩니다. <code>ls &gt; out.txt</code>를 실행하면 셸은 자식에서 <code>open</code>과 <code>dup2</code>를 한 뒤 exec하고, <code>ls</code>는 자기 stdout이 파일인지 터미널인지 신경 쓰지 않습니다. exec가 열린 fd 표를 유지한다는 규칙이 여기서 쓰입니다.</p>
+<p>대안도 있습니다. <code>posix_spawn(&amp;pid, path, file_actions, attrp, argv, envp)</code>은 한 호출에 설정 목록을 넘깁니다. 다만 그 설정은 미리 정해진 옵션 목록이고, fork + 설정 + exec에서는 설정이 평범한 C 코드라 어떤 조합도 가능합니다. 유연함은 fork+exec 쪽이 큽니다. 둘로 나뉜 덕에 셸의 리다이렉션과 파이프(12주차)가 자식 설정 단계의 몇 줄로 끝납니다.</p>
+
+<h2>2부 프로세스의 종료</h2>
+
+<h3>exit status: 자식이 부모에게 남기는 한 바이트</h3>
+<p>자식이 <code>exit(2)</code>로 끝나면 커널이 종료 상태를 보관하고, 부모가 <code>wait(&amp;status)</code>로 그것을 받아 <code>WEXITSTATUS(status)</code>로 2를 꺼냅니다. 커널이 보관하는 값은 <code>0x0200 = (2 &amp; 0377) &lt;&lt; 8</code>의 꼴입니다.</p>
+<ul>
+<li><strong>하위 8비트만 전달됩니다</strong>(<code>status &amp; 0377</code>). 값의 범위는 0~255이고, <code>exit(256)</code>은 0, <code>exit(-1)</code>은 255가 됩니다.</li>
+<li><strong>커널이 보관합니다.</strong> 자식은 사라져도 종료 상태는 부모가 가져갈 때까지 남습니다. 이것이 3부의 좀비입니다.</li>
+<li><strong><code>$?</code>도 같은 값입니다.</strong> 부모가 셸이면 bash가 <code>waitpid</code>로 받은 값을 <code>$?</code>로 보여 줍니다.</li>
+<li><code>main</code>에서 <code>return n</code>은 <code>exit(n)</code>과 같고, <code>main</code>의 끝에 도달하는 것은 <code>return 0</code>과 같습니다.</li>
+</ul>
+<p><code>./wait; echo $?</code>가 0으로 나오는 이유도 이 길을 따라가면 풀립니다. 셸이 받은 것은 자기 자식인 <code>wait.c</code> 부모의 <code>return 0</code>이고, 자식의 2는 그 부모가 받았습니다. 종료 상태는 바로 위 부모에게만 갑니다.</p>
+<p>셸의 관례는 0이 성공, 1~125는 프로그램이 정한 실패, 126은 실행 불가, 127은 못 찾음, 128+n은 시그널 n으로 종료(9주차)입니다.</p>
+
+<h3>exit의 네 단계: 등록 함수 → flush → 임시 파일 → _exit</h3>
+<p><code>exit(3)</code>는 라이브러리 함수이고 <code>_exit(2)</code>는 시스템 호출입니다. <code>exit(status)</code>는 사용자 공간(glibc)에서 다음 순서로 정리한 뒤 커널로 들어갑니다.</p>
+<ol>
+<li><code>atexit</code>로 등록한 함수를 역순으로 호출합니다.</li>
+<li>열린 stdio 스트림을 모두 flush하고 close합니다.</li>
+<li><code>tmpfile(3)</code>로 만든 임시 파일을 삭제합니다.</li>
+<li><code>_exit(status)</code> 시스템 호출을 합니다.</li>
+</ol>
+<p>1~3단계는 사용자 공간의 정리이고, <code>main</code>에서 <code>return</code>해도 같은 길을 갑니다. <code>_exit</code>부터가 커널의 몫입니다. 커널은 열린 fd를 모두 닫고(파일, 파이프, 소켓), 종료 상태를 보관하고(좀비 상태), 부모에게 <code>SIGCHLD</code>를 보내고(9주차), 내 자식들을 PID 1(init)에 입양시키고, 메모리와 자원을 반납합니다. 좀비 한 칸만 남깁니다.</p>
+<p><code>_exit</code>를 직접 부르면 정리 없이 즉시 커널로 갑니다. 1~3단계를 건너뛰는 것입니다. <code>abort</code>와 시그널에 의한 종료도 1~3단계를 건너뜁니다. 9주차 <code>exit_how</code>에서 <code>_exit(3)</code>이 "정리 없이 즉시"였던 이유가 4단계의 위치에 있고, 자식의 실패 경로에 <code>_exit</code>를 쓰는 이유도 여기에 있습니다.</p>
+
+<h3>atexit.c: 종료 처리기 등록</h3>
+<p><a href="atexit.html">atexit</a> 예제는 <code>"Cleanup 1 is called."</code>와 <code>"Cleanup 2 is called."</code>를 찍는 함수 두 개를 등록하고 <code>exit(0)</code>을 부릅니다.</p>
+<pre><code>int main(void) {
+    atexit(cleanup1);
+    atexit(cleanup2);
+
+    exit(0);
+}</code></pre>
+<ul>
+<li><strong>함수 포인터:</strong> <code>atexit</code>가 받는 것은 <code>void (*func)(void)</code>입니다. 인자도 반환값도 없는 함수만 등록할 수 있습니다. <code>atexit</code> 자체는 성공하면 0, 실패하면 0이 아닌 값을 반환하고, 최소 32개의 등록이 보장됩니다(<code>ATEXIT_MAX</code>).</li>
+<li><strong>역순 호출:</strong> 나중에 등록한 <code>cleanup2</code>가 먼저 불립니다. 스택처럼 동작합니다.</li>
+<li><strong><code>exit(0)</code>:</strong> 등록 함수(2 → 1) → flush → <code>_exit</code>의 순서로 진행합니다. <code>return 0</code>이어도 같습니다. <code>_exit(0)</code>으로 바꾸면 두 함수 모두 불리지 않습니다(실습 5).</li>
+</ul>
+<p>실행하면 "Cleanup 2" 다음에 "Cleanup 1"이 나옵니다. 등록의 역순이고, 자원을 얻은 순서의 반대로 놓는 관습과 맞습니다. 이어서 <code>echo $?</code>는 0입니다. <code>exit(0)</code>의 0이 앞에서 본 길을 따라 셸까지 온 것입니다. 종료 처리기는 임시 파일 삭제, 로그 닫기, 터미널 모드 복원처럼 "죽을 때 할 일"에 씁니다.</p>
+
+<h3>자식의 실패 경로는 _exit: 두 번 실행되는 함정</h3>
+<p><code>fork</code>가 stdio 버퍼와 atexit 등록까지 복제한다는 점에서 함정이 생깁니다.</p>
+<pre><code>printf("hello");    /* 줄바꿈 없음 → 파이프·파일이면 버퍼에만 */
+pid = fork();</code></pre>
+<p><code>fork</code> 시점에 버퍼에 "hello"가 남아 있으면 부모와 자식이 각각 그 사본을 가집니다. 부모가 <code>exit</code>하면 flush되어 "hello"가 나가고, 자식이 <code>execlp</code>에 실패해 <code>exit</code>하면 자식의 사본이 또 flush되어 "hello"가 한 번 더 나갑니다. 출력은 <code>hellohello</code>입니다. 한 번만 찍은 줄이 두 번 나오고, 대상이 로그 파일이면 조용히 중복됩니다. 처리기도 사본이라, 자식이 <code>exit</code>하면 부모가 등록한 정리 함수가 자식에서 또 실행되어 결국 두 번 돕니다.</p>
+<ul>
+<li><strong>해법 1:</strong> 자식의 실패 경로는 <code>_exit(127)</code>로 끝냅니다. 처리기 호출과 flush를 건너뛰고 커널로 바로 갑니다. 셸은 이때 127(못 찾음)이나 126(실행 불가)을 씁니다.</li>
+<li><strong>해법 2:</strong> <code>fork</code> 직전에 <code>fflush(NULL)</code>로 복제될 버퍼를 비워 둡니다. 9주차 <code>exit_how</code>가 한 일입니다.</li>
+</ul>
+<p>규칙으로 줄이면 이렇습니다. <strong>자식은 exec에 성공하거나 <code>_exit</code>로 끝납니다. <code>exit</code>와 <code>return</code>은 부모의 것입니다.</strong> 자식은 상속된 버퍼를 다시 처리하지 않습니다.</p>
+
+<h2>3부 자식과의 동기화</h2>
+
+<h3>종료와 회수는 다른 사건이다: 좀비</h3>
+<p>프로세스가 끝나는 것과 프로세스 표에서 사라지는 것은 별개의 사건입니다. 자식이 먼저 끝나는 보통의 경우, 실행 중(R/S)이던 자식이 <code>exit</code> → <code>_exit</code>로 끝나면 상태만 남긴 <strong>좀비(Z)</strong>가 되고, 부모가 <code>wait(&amp;st)</code>로 상태를 가져가는 순간 프로세스 표에서 제거되어 소멸합니다.</p>
+<ul>
+<li><strong>좀비 = 죽었지만 안 치워진 프로세스.</strong> 메모리와 fd는 이미 반납했고 종료 상태 한 칸만 남았습니다. 부모가 exit status를 얻어 갈 때까지 그 상태로 있습니다. <code>ps</code>의 STAT가 Z이고 <code>&lt;defunct&gt;</code>로 표시됩니다.</li>
+<li><strong>치우는 사람은 부모입니다.</strong> <code>wait</code>나 <code>waitpid</code>가 상태를 가져가는 순간 사라집니다.</li>
+<li><strong>부모가 먼저 죽으면</strong> 실행 중인 자식은 고아(orphan)가 되어 PPID가 1이 됩니다. 그 자식이 나중에 <code>exit</code>하면 잠깐 좀비가 되지만 init(PID 1)이 <code>wait</code>해서 대신 회수합니다. <code>fork</code> 실행에서 PPID가 1로 찍힌 것이 이 입양이었습니다.</li>
+</ul>
+<p><code>ps</code>의 STAT 문자는 R 실행, S 잠듦, Z 좀비, T 정지입니다(7주차 <code>state_show</code>에서 본 그 상태입니다).</p>
+<p>좀비는 메모리는 없지만 PID 한 칸을 차지합니다. 오래 쌓이면 PID가 고갈되어 <code>fork</code>가 <code>EAGAIN</code>으로 실패할 수 있습니다. 또 좀비는 <code>kill</code>로 죽일 수 없습니다. 이미 죽었기 때문입니다. 해결은 부모를 고쳐 <code>wait</code>하게 하거나, 부모를 끝내 좀비를 init에 넘기는 것입니다.</p>
+
+<h3>좀비 관찰: 부모가 wait하지 않는 동안</h3>
+<p>C 코드 없이 셸의 <code>exec</code>(프로그램 교체)만으로 "wait하지 않는 부모"를 만들 수 있습니다.</p>
+<pre><code>(sleep 1 &amp; exec sleep 4) &amp; sleep 2; ps -o pid,ppid,stat,cmd; wait</code></pre>
+<ul>
+<li><strong><code>(sleep 1 &amp; exec sleep 4)</code>:</strong> 서브셸이 <code>sleep 1</code>을 백그라운드로 띄운 뒤 자기 자신은 <code>sleep 4</code>로 교체됩니다. 셸이었던 프로세스가 <code>sleep</code>이 되면서 <code>wait</code>할 코드가 사라졌습니다.</li>
+<li><strong><code>[sleep] &lt;defunct&gt;</code>, STAT Z:</strong> 1초 뒤 끝난 자식이 좀비로 남습니다. 그 좀비의 PPID가 <code>sleep 4</code>의 PID이므로 책임자가 누구인지 <code>ps</code>에서 보입니다.</li>
+<li><strong>4초 뒤 사라집니다.</strong> <code>sleep 4</code>가 끝나면 좀비는 PID 1에게 넘어가 회수됩니다. 부모가 할 일을 init이 하는 것입니다.</li>
+</ul>
+
+<h3>wait(2): 아무 자식이나 하나, 끝날 때까지</h3>
+<pre><code>pid_t wait(int *status);         /* &lt;sys/wait.h&gt; — 자식 하나가 끝날 때까지 블록 */</code></pre>
+<ul>
+<li><strong>블록:</strong> 끝난 자식이 없으면 부모는 잠듭니다(S). 자식이 <code>exit(2)</code>로 끝나 종료 상태와 <code>SIGCHLD</code>가 전달되면 깨어납니다. 이미 끝난(좀비) 자식이 있으면 즉시 돌아옵니다.</li>
+<li><strong>누가 끝났나:</strong> 반환값이 끝난 자식의 PID입니다. 자식이 여럿이면 가장 빨리 종료된 자식의 상태를 받습니다. 끝난 순서가 <code>fork</code>한 순서와 같다는 보장은 없습니다.</li>
+<li><strong>-1과 <code>ECHILD</code>:</strong> 기다릴 자식이 없다는 뜻입니다. 9주차 <code>chld_reap</code>이 이 값으로 루프를 끝냈습니다.</li>
+<li><strong>-1과 <code>EINTR</code>:</strong> 잡은 시그널 때문에 깨어난 경우입니다(9주차의 EINTR 패턴).</li>
+<li><code>status</code>에 <code>NULL</code>을 주면 상태는 버립니다. <code>wait(&amp;s)</code>는 <code>waitpid(-1, &amp;s, 0)</code>과 같습니다.</li>
+</ul>
+
+<h3>status의 비트와 매크로</h3>
+<p>glibc(Linux)에서 status는 비트 15~8에 종료 코드, 비트 6~0에 시그널 번호, 그 사이의 한 비트에 코어 덤프 여부를 담습니다. 실제 값으로 보면 다음과 같습니다.</p>
+<table>
+<thead><tr><th>status</th><th>판정</th><th>값</th><th>어디서 봤나</th></tr></thead>
+<tbody>
+<tr><td><code>0x0200</code></td><td><code>WIFEXITED</code></td><td><code>WEXITSTATUS</code> = 2</td><td>wait.c (Status: 512, 200)</td></tr>
+<tr><td><code>0x0300</code></td><td><code>WIFEXITED</code></td><td><code>WEXITSTATUS</code> = 3</td><td>waitpid.c · 9주차 exit_how exit</td></tr>
+<tr><td><code>0x000f</code></td><td><code>WIFSIGNALED</code></td><td><code>WTERMSIG</code> = 15 (TERM)</td><td>9주차 exit_how term</td></tr>
+<tr><td><code>0x0086</code></td><td><code>WIFSIGNALED</code></td><td><code>WTERMSIG</code> = 6, <code>WCOREDUMP</code></td><td>9주차 exit_how abort</td></tr>
+<tr><td><code>0x137f</code></td><td><code>WIFSTOPPED</code></td><td><code>WSTOPSIG</code> = 19 (STOP)</td><td>9주차 exit_how wait (<code>WUNTRACED</code>)</td></tr>
+<tr><td><code>0xffff</code></td><td><code>WIFCONTINUED</code></td><td></td><td>9주차 exit_how wait (<code>WCONTINUED</code>)</td></tr>
+</tbody>
+</table>
+<p>이 배치는 glibc의 것이고, POSIX는 매크로만 약속합니다. 구성은 시스템마다 다를 수 있으므로 <code>status &gt;&gt; 8</code> 같은 직접 연산은 이식성이 없습니다. 그래서 비트를 직접 읽지 않고 매크로로 묻습니다. 순서는 <strong>판정 먼저, 값은 다음</strong>입니다.</p>
+<ul>
+<li><strong>정상 종료:</strong> <code>WIFEXITED(s)</code>가 참이면 <code>WEXITSTATUS(s)</code>가 <code>exit</code>의 값(0~255)입니다.</li>
+<li><strong>시그널 종료:</strong> <code>WIFSIGNALED(s)</code>가 참이면 <code>WTERMSIG(s)</code>가 시그널 번호, <code>WCOREDUMP(s)</code>가 코어 덤프 여부입니다.</li>
+<li><strong>정지·재개:</strong> <code>WIFSTOPPED(s)</code>가 참이면 <code>WSTOPSIG(s)</code>, 그리고 <code>WIFCONTINUED(s)</code>.</li>
+</ul>
+
+<h3>wait.c: 자식 exit(2)를 부모가 받는다</h3>
+<p><a href="wait.html">wait</a> 예제에서 자식은 "--&gt; Child Process"를 찍고 <code>exit(2)</code>로 끝나고, 부모는 그 상태를 받아 원시 값과 매크로 값을 함께 보여 줍니다.</p>
+<pre><code>default :  /* parent process */
+    while (wait(&amp;status) != pid)
+        continue;
+    printf("--&gt; Parent process\n");
+    printf("Status: %d, %x\n", status, status);
+    printf("Child process Exit Status:%d\n",
+            WEXITSTATUS(status));</code></pre>
+<ul>
+<li><strong><code>while (wait(&amp;status) != pid)</code>:</strong> <code>wait</code>는 아무 자식이나 돌려주므로 다른 자식이 먼저 끝났을 수 있습니다. 그래서 내 자식의 PID가 올 때까지 반복합니다. <code>status</code>는 종료 상태를 받을 <code>int</code>이고 <code>wait</code>에는 그 주소를 넘깁니다. <code>wait</code>와 <code>WEXITSTATUS</code>는 <code>sys/wait.h</code>에 있습니다.</li>
+<li><strong><code>Status: 512, 200</code>:</strong> 512와 0x200은 같은 값의 두 표기이고, 16진수가 바이트 경계를 보여 줍니다. 512 = 2 &lt;&lt; 8, 곧 상위 바이트에 2가 실려 있습니다. 하위 바이트가 0이라는 것은 시그널도 없고 코어도 없다는 뜻입니다.</li>
+<li><strong><code>WEXITSTATUS</code>:</strong> 상위 바이트를 꺼내 2를 줍니다. 직접 <code>&gt;&gt; 8</code>을 하지 않는 이유는 앞에서 본 이식성입니다.</li>
+</ul>
+<p>실행하면 Child 줄이 먼저 나옵니다. 부모가 <code>wait</code>에서 자고 있었기 때문이고, <code>fork.c</code>와 달리 이번에는 순서가 보장됩니다. <code>echo $?</code>는 0입니다. 부모의 <code>return 0</code>이 셸에 전달된 것이고, 자식의 2는 부모가 받고 끝났습니다.</p>
+
+<h3>strace로 본 wait: wait4와 SIGCHLD</h3>
+<ul>
+<li><strong><code>wait4(-1, …)</code>:</strong> <code>wait(&amp;status)</code>는 <code>wait4(-1, &amp;status, 0, NULL)</code>로 나타납니다. -1은 아무 자식이나 기다린다는 뜻입니다.</li>
+<li><strong><code>exit_group(2)</code>:</strong> 자식 249가 2로 끝나자 <code>wait4</code>가 그 결과를 들고 249를 반환했습니다. strace는 status를 매크로 식으로 풀어 <code>[{WIFEXITED(s) &amp;&amp; WEXITSTATUS(s) == 2}]</code>처럼 보여 줍니다.</li>
+<li><strong><code>SIGCHLD</code>:</strong> 회수와는 별개로 커널이 부모에게 <code>SIGCHLD</code>도 보냈습니다. 여기에도 <code>si_status=2</code>가 실려 있습니다(9주차의 재료).</li>
+</ul>
+
+<h3>waitpid(pid, &amp;status, options): 누구를, 어떻게</h3>
+<pre><code>pid_t waitpid(pid_t pid, int *status, int options);</code></pre>
+<table>
+<thead><tr><th>pid — 누구를</th><th>의미</th></tr></thead>
+<tbody>
+<tr><td>&gt; 0</td><td>그 PID의 자식 하나</td></tr>
+<tr><td>-1</td><td>아무 자식 (<code>wait</code>와 같음)</td></tr>
+<tr><td>0</td><td>나와 같은 프로세스 그룹의 자식</td></tr>
+<tr><td>&lt; -1</td><td>프로세스 그룹 -pid의 자식</td></tr>
+</tbody>
+</table>
+<table>
+<thead><tr><th>options — 어떻게</th><th>의미</th></tr></thead>
+<tbody>
+<tr><td><code>WNOHANG</code></td><td>끝난 자식이 없으면 즉시 0</td></tr>
+<tr><td><code>WUNTRACED</code></td><td>정지(STOP)도 보고</td></tr>
+<tr><td><code>WCONTINUED</code></td><td>재개(CONT)도 보고</td></tr>
+<tr><td>0</td><td>옵션 없음: 끝날 때까지 블록</td></tr>
+</tbody>
+</table>
+<p>반환값은 자식의 PID, 0(<code>WNOHANG</code>인데 아직 안 끝남), -1(<code>ECHILD</code>, <code>EINTR</code>) 중 하나입니다.</p>
+<ul>
+<li><strong>pid로 콕 집습니다.</strong> 자식이 여럿일 때 특정 자식(예를 들어 두 번째, 세 번째 자식)의 상태만 가져올 수 있습니다.</li>
+<li><strong><code>WNOHANG</code>:</strong> 자식이 종료 전이라도 기다리지 않고 0으로 돌아옵니다. "끝났니?" 하고 찔러 보는 폴링입니다. 9주차의 관용구 <code>while (waitpid(-1, &amp;st, WNOHANG) &gt; 0)</code>은 끝난 자식을 있는 만큼 회수하고, 더 없으면 잠들지 않고 빠져나옵니다. 수거 루프가 <code>WNOHANG</code>이었던 이유입니다.</li>
+<li><strong><code>WUNTRACED</code>:</strong> 9주차 <code>exit_how</code>가 STOP·CONT 보고를 받던 옵션입니다. 같은 함수입니다.</li>
+</ul>
+
+<h3>waitpid.c: WNOHANG으로 1초마다 찔러 본다</h3>
+<p><a href="waitpid.html">waitpid</a> 예제는 <code>switch</code> 대신 <code>if</code>를 쓰지만 같은 세 갈래입니다(<code>&lt; 0</code> 실패, <code>== 0</code> 자식, 나머지 부모). 자식은 "--&gt; Child process"를 찍고 3초 잔 뒤 <code>exit(3)</code>을 합니다. 이 3초가 부모가 폴링할 시간을 벌어 줍니다.</p>
+<pre><code>printf("--&gt; Parent process\n");
+while (waitpid(pid, &amp;status, WNOHANG) == 0) {
+    printf("Parent still wait...\n");
+    sleep(1);
+}
+printf("Child Exit Status : %d\n", WEXITSTATUS(status));</code></pre>
+<ul>
+<li><strong><code>== 0</code>이면 아직입니다.</strong> <code>WNOHANG</code>이라 자식이 살아 있으면 0이 돌아옵니다. 메시지를 찍고 1초 잔 뒤 다시 묻습니다.</li>
+<li><strong>반환값이 pid가 되면</strong> 루프가 끝나고 <code>WEXITSTATUS</code>는 3입니다. <code>status</code>는 루프의 마지막 <code>waitpid</code>가 채웠습니다.</li>
+</ul>
+<p>강의의 실행에서는 "Parent still wait..."가 세 번 나왔습니다. 0·1·2초의 세 질문에는 0이 돌아왔고, 3초째 질문에서 pid가 돌아와 3을 받았습니다. 영상의 실행에서는 네 번이었는데, 폴링 시점과 자식의 종료 시점이 겹치면 횟수가 달라집니다. 폴링 중에 <code>ps</code>를 보면 bash → 부모 → 자식의 사슬이 보이고 둘 다 S(잠듦)입니다. 부모는 <code>sleep(1)</code>, 자식은 <code>sleep(3)</code> 안에 있기 때문입니다. 끝나면 셸이 <code>[1]+ Done</code>을 알립니다. 셸도 같은 일을 하는 것입니다. 백그라운드 작업을 <code>waitpid</code>로 회수하고 Done을 알립니다.</p>
+
+<h3>자식의 끝을 아는 세 가지 방법</h3>
+<table>
+<thead><tr><th></th><th>① 블로킹 wait</th><th>② WNOHANG 폴링</th><th>③ SIGCHLD 통지</th></tr></thead>
+<tbody>
+<tr><td>형태</td><td><code>wait(&amp;status);</code><br>끝날 때까지 잠든다</td><td><code>while (waitpid(pid, &amp;s, WNOHANG) == 0) { 다른 일; sleep(1); }</code></td><td>핸들러에서 <code>flag = 1</code>, main은 깨어나면 <code>while (waitpid(-1, &amp;s, WNOHANG) &gt; 0)</code>로 수거</td></tr>
+<tr><td>특징</td><td>가장 단순하다. 기다리는 동안 부모는 아무것도 못 한다.</td><td>부모가 다른 일을 하며 틈틈이 묻는다. 늦게 알거나(최대 1초) CPU를 낭비한다.</td><td>끝났을 때만 깨어난다. 핸들러 규범(9주차)이 필요하다.</td></tr>
+<tr><td>예</td><td>wait.c, 셸의 전경 명령</td><td>waitpid.c</td><td>chld_reap.c, 셸의 <code>&amp;</code></td></tr>
+</tbody>
+</table>
+<p>셸은 ①과 ③을 함께 씁니다. 전경 명령은 <code>waitpid</code>로 블록하고, 백그라운드(<code>&amp;</code>) 작업은 <code>SIGCHLD</code>를 받아 수거한 뒤 Done을 알립니다.</p>
+
+<h2>관찰과 활용</h2>
+
+<h3>질문별 관찰 창</h3>
+<table>
+<thead><tr><th>질문</th><th>프로그램의 자기 보고</th><th>밖에서 보는 창</th></tr></thead>
+<tbody>
+<tr><td>fork의 반환값은 무엇인가</td><td>Parent: My Child's PID:221<br>Child: My PID:221, PPID 1 또는 222</td><td><code>echo $$</code> · <code>ps -o pid,ppid</code><br>strace: <code>clone(… SIGCHLD) = 271</code></td></tr>
+<tr><td>exec가 정말 교체했나</td><td>"After" 줄이 없다<br><code>| head</code>에서는 Before도 사라짐</td><td>strace: <code>execve("/usr/bin/ls") = 0</code><br><code>$?</code>는 ls의 종료 상태</td></tr>
+<tr><td>자식은 어떻게 끝났나</td><td>Status: 512, 200<br>Child process Exit Status:2</td><td>strace: <code>wait4</code> … <code>WEXITSTATUS == 2</code><br><code>SIGCHLD si_status=2</code></td></tr>
+<tr><td>좀비가 남았나</td><td>(프로그램은 모른다)</td><td><code>ps -o pid,ppid,stat,cmd</code><br>Z · <code>[sleep] &lt;defunct&gt;</code> · PPID</td></tr>
+<tr><td>exit 때 무엇이 도나</td><td>Cleanup 2 → Cleanup 1</td><td>strace: <code>exit_group(0)</code><br><code>echo $?</code> = 0</td></tr>
+</tbody>
+</table>
+<p>macOS에는 <code>strace</code>가 없고 <code>ps</code>의 <code>cmd</code> 키워드도 없습니다(<code>command</code>를 씁니다). 그 두 창은 Linux에서 엽니다.</p>
+
+<h3>이것으로 할 수 있는 일</h3>
+<ul>
+<li><strong>미니 셸 1단계:</strong> 한 줄 읽기 → 토큰 나누기 → <code>fork</code> → 자식 <code>execvp</code> → 부모 <code>waitpid</code> → <code>$?</code> 표시. 조별 캡스톤의 출발점이고, 2차시에서 한 줄을 읽어 실행하는 셸을 만듭니다.</li>
+<li><strong>명령 실행기:</strong> PATH를 검색해 실행하고, 못 찾으면 127("command not found"), 시그널 종료는 128+n으로 구분합니다.</li>
+<li><strong>병렬 작업 분배:</strong> 자식 n개에 일을 나누고 <code>waitpid</code>로 종료 코드를 모읍니다. 11주차 mmap, 12주차 파이프로 확장됩니다.</li>
+<li><strong>서비스 프로세스:</strong> <code>fork</code> 뒤 부모가 종료하면 고아가 된 자식이 배경에서 삽니다. <code>nohup</code>, <code>setsid</code>와 함께 2차시에서 다룹니다.</li>
+</ul>
+<p>오늘의 세 계약인 fork(복제), exec(교체), wait(회수)가 이 모든 프로세스 관리 도구의 바탕입니다.</p>
+
+<h3>실습 안내</h3>
+<p>먼저 <code>make</code>와 <code>make check</code>로 예제 7개를 빌드하고 <code>test_examples.py</code>(8회 실행)를 통과시킵니다.</p>
+<ul>
+<li><strong>실습 1 fork:</strong> <code>echo $$</code> 뒤 <code>./fork</code>를 여러 번 실행해 PID 사슬과, PPID가 1이 되는 경우를 기록합니다.</li>
+<li><strong>실습 2 exec:</strong> <code>./execlp</code>, <code>./execlp | head -3</code>, <code>PATH=/nonexistent ./execlp</code>의 세 결과를 비교합니다.</li>
+<li><strong>실습 3 forkNexec:</strong> 프롬프트와 <code>ls</code> 출력의 순서를 보고, <code>strace -f -e trace=%process</code>로 <code>execve</code> 횟수를 셉니다.</li>
+<li><strong>실습 4 wait·waitpid:</strong> <code>Status: 512, 200</code>을 해석하고, <code>ps</code>로 사슬을 확인하고, 셸만으로 좀비를 만들어 봅니다.</li>
+<li><strong>실습 5 atexit:</strong> 호출 순서를 확인하고, <code>exit</code>를 <code>_exit</code>, <code>return</code>, <code>abort</code>로 바꿔 봅니다. 결과는 REPORT.md에 적습니다.</li>
+</ul>
+
+<h2>정리</h2>
+<ul>
+<li><strong>fork:</strong> 한 번 호출, 두 번 반환. 메모리는 사본(COW), 열린 파일 설명은 공유, PID와 PPID는 새로 받습니다.</li>
+<li><strong>exec:</strong> 같은 PID에 새 프로그램. 성공하면 돌아오지 않고 stdio 버퍼도 함께 사라집니다.</li>
+<li>fork + exec + wait가 셸의 명령 실행입니다. 설정 단계가 둘 사이에 있어 리다이렉션이 쉽습니다.</li>
+<li><code>exit</code>는 처리기(역순) → flush → <code>_exit</code>의 순서입니다. 자식의 실패 경로는 <code>_exit</code>로 끝냅니다.</li>
+<li>종료와 회수는 다른 사건입니다. 좀비는 부모의 <code>wait</code>가 치우고, 고아는 init이 맡습니다.</li>
+<li>status는 매크로로 읽습니다: <code>WIFEXITED</code> → <code>WEXITSTATUS</code>, <code>WIFSIGNALED</code> → <code>WTERMSIG</code>.</li>
+</ul>
+    </article>
   </main>
 </body>
 </html>

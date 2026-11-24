@@ -4,6 +4,7 @@
 [v86](https://github.com/copy/v86) 에뮬레이터 위에서 [Buildroot](https://buildroot.org/)로 만든 커널과 initramfs를 실행하며, 정적 파일만으로 동작하므로 GitHub Pages에 그대로 배포됩니다.
 
 - **시스템 프로그래밍 예제** — [2026_SystemProgramming](https://github.com/HimmelsscheibeVonNebra/2026_SystemProgramming) 강의의 C 예제마다 페이지가 하나씩 있습니다. 페이지를 열면 그 수업 디렉터리에서 `student` 사용자 셸이 뜨고, 컴파일된 실행 파일과 소스가 들어 있습니다. 실행 순서의 ▶ 버튼을 누르면 명령이 터미널에 입력됩니다.
+- **강의 내용** — 수업별 페이지(`examples/<수업>/index.html`)에 그 수업 슬라이드를 풀어 쓴 글이 예제 목록과 함께 실려 있습니다. `class-notes/<수업>.html`을 고치고 `node scripts/gen-pages.mjs`를 실행하면 반영됩니다. 생성기가 허용 태그(`h2 h3 p ul ol li pre code table … a`)와 예제 링크를 검사합니다.
 - **커널 모듈 실습** — `kernel.html`. root 셸에서 `insmod` / `rmmod` / `dmesg`, procfs, sysfs, 문자 디바이스를 실습합니다.
 
 ## 구성
@@ -16,6 +17,7 @@ images/                              bzImage, rootfs.cpio.gz (빌드 결과물)
 
 sysprog/                             강의 예제 소스 (.c, .h, Makefile) 사본
 examples-meta/                       예제별 설명과 실행 순서 (수업당 JSON 하나)
+class-notes/                         수업별 강의 내용 (슬라이드를 풀어 쓴 HTML 조각, 수업 페이지에 삽입)
 exercises/                           커널 모듈 소스 (01~04)
 buildroot-external/                  Buildroot 설정: 커널 설정, rootfs overlay, 패키지
 docker/, scripts/                    이미지 빌드 환경, 빌드·페이지 생성 스크립트

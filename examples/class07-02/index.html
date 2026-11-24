@@ -13,13 +13,685 @@
     <p>요구 페이징, /proc/PID/stat 해석, user·sys·대기 시간, 좀비·고아, 자원 한계 초과를 숫자로 측정하고 실험한다.</p>
   </header>
   <main class="list">
-    <ul class="cards">
-      <li><a href="pagetouch.html"><strong>pagetouch</strong><span>큰 블록을 malloc한 뒤 페이지를 하나씩 건드리며 VmRSS와 minor page fault(getrusage의 minflt) 변화를 단계별로 출력해 요구 페이징을 보여 준다.</span></a></li>
-      <li><a href="pstat.html"><strong>pstat</strong><span>/proc/PID/stat 한 줄을 해석해 상태·CPU 시간·메모리·폴트 수를 출력하고, 1초 간격 표본의 틱 차이로 %CPU를 계산하는 미니 top이다.</span></a></li>
-      <li><a href="cpu_wait.html"><strong>cpu_wait</strong><span>같은 1초를 사용자 모드 계산(busy), 시스템 호출 반복(sys), 잠자기(sleep)로 보내고 getrusage로 user·sys CPU 시간과 자발적·비자발적 문맥 교환 횟수를 비교한다.</span></a></li>
-      <li><a href="reap_show.html"><strong>reap_show</strong><span>fork한 자식이 먼저 끝났는데 부모가 waitpid를 미루면 좀비(Z)가 되고, 부모가 먼저 끝나면 고아가 되어 새 부모에게 입양되는 과정을 보여 준다.</span></a></li>
-      <li><a href="limit_lab.html"><strong>limit_lab</strong><span>setrlimit으로 soft 한계(NOFILE·AS·CPU)를 낮춘 뒤 일부러 넘겨 EMFILE, ENOMEM, SIGXCPU가 각각 어떻게 나타나는지 확인한다.</span></a></li>
-    </ul>
+    <section>
+      <h2>실행해 볼 예제</h2>
+      <ul class="cards">
+        <li><a href="pagetouch.html"><strong>pagetouch</strong><span>큰 블록을 malloc한 뒤 페이지를 하나씩 건드리며 VmRSS와 minor page fault(getrusage의 minflt) 변화를 단계별로 출력해 요구 페이징을 보여 준다.</span></a></li>
+        <li><a href="pstat.html"><strong>pstat</strong><span>/proc/PID/stat 한 줄을 해석해 상태·CPU 시간·메모리·폴트 수를 출력하고, 1초 간격 표본의 틱 차이로 %CPU를 계산하는 미니 top이다.</span></a></li>
+        <li><a href="cpu_wait.html"><strong>cpu_wait</strong><span>같은 1초를 사용자 모드 계산(busy), 시스템 호출 반복(sys), 잠자기(sleep)로 보내고 getrusage로 user·sys CPU 시간과 자발적·비자발적 문맥 교환 횟수를 비교한다.</span></a></li>
+        <li><a href="reap_show.html"><strong>reap_show</strong><span>fork한 자식이 먼저 끝났는데 부모가 waitpid를 미루면 좀비(Z)가 되고, 부모가 먼저 끝나면 고아가 되어 새 부모에게 입양되는 과정을 보여 준다.</span></a></li>
+        <li><a href="limit_lab.html"><strong>limit_lab</strong><span>setrlimit으로 soft 한계(NOFILE·AS·CPU)를 낮춘 뒤 일부러 넘겨 EMFILE, ENOMEM, SIGXCPU가 각각 어떻게 나타나는지 확인한다.</span></a></li>
+      </ul>
+    </section>
+    <article class="notes">
+<p>7주차 1차시가 프로세스를 <strong>관찰</strong>하는 시간이었다면, 이번 차시는 같은 대상을 <strong>측정하고 실험</strong>하는 시간입니다. 지난 시간에 본 사실 하나하나가 이번에는 질문이 되고, 질문마다 답을 내는 실습 프로그램이 하나씩 있습니다.</p>
+
+<table>
+<thead>
+<tr><th>1차시에 관찰한 것</th><th>이번 차시의 질문</th><th>실습 프로그램</th></tr>
+</thead>
+<tbody>
+<tr><td>VmRSS가 VmSize보다 작다</td><td>RSS는 언제, 얼마씩 커지나?</td><td><a href="pagetouch.html">pagetouch</a></td></tr>
+<tr><td>STAT가 S 또는 R이다</td><td>CPU를 얼마나 쓰고, 얼마나 자주 잠드나?</td><td><a href="pstat.html">pstat</a> · <a href="cpu_wait.html">cpu_wait</a></td></tr>
+<tr><td>ps에 Z가 보인다</td><td>좀비는 언제 생기고 누가 치우나? 부모가 먼저 죽으면?</td><td><a href="reap_show.html">reap_show</a></td></tr>
+<tr><td>NOFILE soft 한계는 1024다</td><td>한계를 넘으면 정확히 무엇이 일어나나?</td><td><a href="limit_lab.html">limit_lab</a></td></tr>
+</tbody>
+</table>
+
+<p>네 부 모두 같은 동작을 반복합니다. <strong>숫자를 먼저 예측하고, 측정하고, 예측과 다르면 왜 다른지 설명합니다.</strong> 본문에 나오는 실행 결과의 숫자는 Ubuntu 24.04(x86-64, 커널 6.8) 실습 서버에서 얻은 값입니다.</p>
+
+<h2>1부 메모리: 요구 페이징을 센다</h2>
+
+<p>1부에서는 페이지 폴트 수와 VmRSS라는 두 숫자로, 메모리가 실제로 올라오는 순간을 측정합니다.</p>
+
+<h3>페이지와 페이지 표 항목</h3>
+
+<p>커널은 주소를 <strong>페이지</strong>라는 단위로 나누고, 이 단위로 가상 주소와 물리 메모리를 연결합니다. 실습 서버에서 <code>getconf PAGESIZE</code>는 4096을 돌려주므로 한 페이지가 4096바이트입니다. macOS(Apple 실리콘)에서는 16384입니다.</p>
+
+<p>가상 페이지마다 페이지 표 항목이 하나씩 있고, 그 안의 <strong>present 비트</strong>가 이 페이지가 물리 프레임에 연결되어 있는지를 표시합니다. present가 1이면 항목이 프레임을 가리키고, 0이면 아직 연결된 프레임이 없습니다. 이 비트가 꺼져 있는 페이지에 접근하면 페이지 폴트가 일어납니다.</p>
+
+<p>여기서 가장 중요한 구분은 <strong>예약과 연결은 다르다</strong>는 점입니다. <code>malloc</code>은 주소 범위를 예약할 뿐이고, 프레임과의 연결은 그 페이지를 처음 건드릴 때 이루어집니다. present가 0인 페이지를 처음 건드리면 페이지 폴트가 나고, 커널이 그때 프레임을 붙여 줍니다.</p>
+
+<h3>페이지 폴트가 처리되는 순서</h3>
+
+<p><code>buf[i * 4096] = 1;</code> 같은 명령이 어떤 주소에 쓰려고 할 때 일어나는 일을 순서대로 따라가 보겠습니다.</p>
+
+<ol>
+<li>MMU가 페이지 표를 보고 연결이 없다는 것을 알게 되어 페이지 폴트를 일으킵니다.</li>
+<li>커널의 폴트 처리기가 그 주소가 유효한 구역인지 확인합니다. 유효하지 않으면 잘못된 접근이므로 SIGSEGV를 보냅니다.</li>
+<li>유효한데 새 페이지라면 <strong>minor 폴트</strong>입니다. 0으로 채운 프레임을 연결하며 디스크 읽기는 없습니다.</li>
+<li>유효한데 내용이 디스크에 있다면 <strong>major 폴트</strong>입니다. 파일이나 스왑에서 읽어 와 연결하며, 디스크를 기다리는 동안 프로세스는 D 상태가 됩니다.</li>
+<li>커널이 페이지 표를 고친 뒤 <strong>같은 명령을 다시 실행</strong>하고, 이번에는 성공합니다.</li>
+</ol>
+
+<p>따라서 폴트는 오류가 아니라 정상 동작입니다. 프로그램은 폴트가 일어난 줄도 모른 채 같은 명령을 다시 실행할 뿐입니다.</p>
+
+<h3>세 가지 폴트</h3>
+
+<table>
+<thead>
+<tr><th>종류</th><th>뜻</th><th>예</th></tr>
+</thead>
+<tbody>
+<tr><td>minor (<code>ru_minflt</code>)</td><td>디스크 없이 처리됩니다.</td><td>새 페이지, 이미 캐시에 있는 파일 페이지</td></tr>
+<tr><td>major (<code>ru_majflt</code>)</td><td>디스크를 읽어야 합니다.</td><td>처음 실행한 큰 프로그램, 스왑에서 돌아온 페이지</td></tr>
+<tr><td>잘못된 접근</td><td>매핑 밖이거나 권한 위반입니다. SIGSEGV로 이어집니다.</td><td>NULL 역참조, 코드 구역에 쓰기</td></tr>
+</tbody>
+</table>
+
+<p>앞의 두 종류는 횟수를 셀 수 있습니다. 표준 API인 <code>getrusage</code>가 <code>ru_minflt</code>와 <code>ru_majflt</code>로 누적 폴트 수를 알려 줍니다.</p>
+
+<h3>pagetouch: 페이지마다 한 바이트</h3>
+
+<p><a href="pagetouch.html">pagetouch</a>는 요구 페이징을 숫자로 확인하는 프로그램입니다. 큰 블록을 <code>malloc</code>한 뒤 단계마다 <code>report</code>를 불러 그 시점의 값을 찍습니다. <code>report</code>는 <code>getrusage</code>의 minflt·majflt와 <code>/proc/self/status</code>의 VmRSS를 한 줄로 출력합니다.</p>
+
+<pre><code>report("start");
+volatile char *buf = malloc(size);      /* 예약만 */
+report("after_malloc");
+for (size_t i = 0; i &lt; pages / 2; i++)
+    buf[i * (size_t)page] = 1;          /* 절반을 처음 건드림 */
+report("touch_half");
+for (size_t i = pages / 2; i &lt; pages; i++)
+    buf[i * (size_t)page] = 1;          /* 나머지 절반 */
+report("touch_all");
+for (size_t i = 0; i &lt; pages; i++)
+    buf[i * (size_t)page] = 2;          /* 두 번째 접근 */
+report("touch_again");
+free((void *)buf);
+report("after_free");</code></pre>
+
+<p>핵심은 <strong>한 페이지에 한 바이트만</strong> 쓴다는 점입니다. <code>page</code> 간격으로 쓰기 때문에 폴트는 쓴 바이트 수가 아니라 건드린 페이지 수만큼 일어납니다. <code>buf</code>에 붙은 <code>volatile</code>은 <code>free</code> 직전의 쓰기를 컴파일러가 쓸모없다고 판단해 지워 버리지 못하게 합니다. 쓰기가 지워지면 폴트도 일어나지 않아 실험이 성립하지 않습니다.</p>
+
+<h3>실행 결과 읽기</h3>
+
+<p>64 MiB로 실행했을 때 단계별 VmRSS(MiB로 환산)와 누적 minflt는 다음과 같았습니다.</p>
+
+<table>
+<thead>
+<tr><th>단계</th><th>VmRSS</th><th>누적 minflt</th></tr>
+</thead>
+<tbody>
+<tr><td>start</td><td>1.6 MiB</td><td>83</td></tr>
+<tr><td>after_malloc</td><td>1.6 MiB</td><td>85</td></tr>
+<tr><td>touch_half</td><td>33.6 MiB</td><td>8276</td></tr>
+<tr><td>touch_all</td><td>65.6 MiB</td><td>16468</td></tr>
+<tr><td>touch_again</td><td>65.6 MiB</td><td>16468</td></tr>
+<tr><td>after_free</td><td>1.6 MiB</td><td>16468</td></tr>
+</tbody>
+</table>
+
+<ul>
+<li><strong>malloc 직후</strong>: 64 MiB를 받았는데 RSS는 4 KiB, 폴트는 2만 늘었습니다. 예약만 한 것이기 때문입니다.</li>
+<li><strong>처음 건드릴 때</strong>: 64 MiB에서 두 단계의 폴트 합은 16383으로, 페이지 수 16384와 거의 같습니다. 256 MiB로 실행하면 65535로, 65536쪽과 거의 같습니다. 절반을 건드리면 RSS도 절반만큼, 전부 건드리면 전부만큼 올라옵니다.</li>
+<li><strong>두 번째 접근</strong>: 폴트는 0이고 RSS도 그대로입니다. 이미 연결된 페이지에는 폴트가 없습니다.</li>
+</ul>
+
+<h3>free 뒤에 RSS가 줄어든 이유</h3>
+
+<p>마지막 단계에서 RSS가 67204 KiB에서 1668 KiB로 돌아왔습니다. <code>free</code>를 하면 항상 이렇게 되는 것은 아니며, 요청 크기에 따라 glibc의 <code>malloc</code>이 다르게 동작하기 때문에 생긴 결과입니다.</p>
+
+<ul>
+<li><strong>작은 요청(128 KiB 미만)</strong>은 <code>[heap]</code> 안에서 잘라 줍니다. <code>free</code>해도 힙에 남겨 두고 재사용하므로 RSS가 바로 줄지 않습니다.</li>
+<li><strong>큰 요청(기본 128 KiB 이상)</strong>은 <code>mmap</code>으로 별도의 익명 구역을 받아 줍니다. maps에 한 행이 추가됩니다. 이 경우 <code>free</code>는 곧 <code>munmap</code>이어서 구역째 커널에 돌려주므로, 그 페이지가 RSS에서 빠집니다.</li>
+</ul>
+
+<p>pagetouch의 64 MiB는 큰 요청 쪽이므로 <code>free</code>와 함께 구역과 RSS가 사라졌습니다. 기준값은 <code>mallopt(3)</code>의 <code>M_MMAP_THRESHOLD</code>(기본 128 KiB, 64비트에서 동적 조정 상한 32 MiB)입니다. 이것은 glibc 구현의 동작이며 C 표준이 보장하는 계약은 아닙니다.</p>
+
+<h3>RSS와 PSS: 공유 페이지 나누기</h3>
+
+<p>RSS에는 한 가지 함정이 있습니다. libc의 한 페이지(4 KiB)를 sleep, bash, sshd, cron 네 프로세스가 함께 쓰고 있다고 하겠습니다. RSS는 이 페이지를 프로세스마다 4 KiB로 세므로 모두 더하면 16 KiB가 되어, 실제로는 4 KiB뿐인 메모리를 중복해서 셉니다. <strong>PSS</strong>는 공유하는 프로세스 수 N으로 나누어 프로세스마다 4/N = 1 KiB로 세므로, 모두 더하면 4 KiB로 실제와 맞습니다.</p>
+
+<p>실습 서버에서 <code>sleep 60</code>을 살펴본 결과, RSS 2124 kB 가운데 2016 kB가 다른 프로세스와 함께 쓰는 파일 페이지였고, 이 프로세스의 몫(PSS)은 204 kB였습니다. 자세한 항목은 <code>man 5 proc_pid_smaps</code>에 있습니다.</p>
+
+<h3>malloc 성공 ≠ 메모리 확보</h3>
+
+<p>예약과 연결이 따로라는 사실에서 한 가지 결과가 더 나옵니다.</p>
+
+<ul>
+<li><strong>과잉 약속</strong>: Linux 기본 설정(<code>overcommit_memory=0</code>)은 실제 여유보다 큰 예약도 허락합니다. 실습 서버에서도 <code>cat /proc/sys/vm/overcommit_memory</code>는 0입니다.</li>
+<li><strong>진짜 부족은 나중에</strong>: 페이지를 건드릴 때 붙여 줄 프레임이 없으면 그때 문제가 됩니다. <code>malloc</code>이 성공했다고 해서 메모리가 확보된 것이 아닙니다.</li>
+<li><strong>OOM killer</strong>: 그런 상황이 되면 커널이 프로세스 하나를 골라 SIGKILL로 끝내고 메모리를 되찾습니다.</li>
+</ul>
+
+<h3>직접 확인 1: 메모리</h3>
+
+<pre><code>./pagetouch 64
+./pagetouch 256                      # 폴트 수를 먼저 예측
+getconf PAGESIZE
+
+../class07-01/addr_show 30 &amp;       # 7주차 1차시 프로그램
+grep -E '^(Rss|Pss|Shared|Private)' /proc/$!/smaps_rollup
+grep -E '^(VmRSS|RssAnon|RssFile)' /proc/$!/status
+wait
+
+cat /proc/sys/vm/overcommit_memory</code></pre>
+
+<ul>
+<li><strong>예측 먼저</strong>: 256 MiB라면 touch_all까지 minflt가 몇 늘지 실행하기 전에 계산합니다.</li>
+<li><strong>macOS 비교</strong>: macOS는 페이지가 16 KiB라서 폴트 수가 1/4이 됩니다.</li>
+<li><strong>PSS 비교</strong>: RSS, PSS, Private 값을 적고 차이가 어디서 오는지 설명합니다.</li>
+</ul>
+
+<p>기록은 <code>labs/class07-02/REPORT.md</code>의 실습 1 칸에 합니다.</p>
+
+<h3>코드 읽기를 위한 준비: 변수의 꼬리표</h3>
+
+<p>각 부의 실습 뒤에는 그 부의 예제 소스를 처음부터 끝까지 읽는 시간이 이어집니다. 예제마다 변수 표를 먼저 보고, 편집기와 같은 행 번호를 따라 코드를 묶음별로 읽습니다. 이때 모든 변수 이름 뒤에 다음 꼬리표를 붙여 구분합니다.</p>
+
+<ul>
+<li><strong>[전역]</strong> 함수 밖에서 선언한 변수</li>
+<li><strong>[지역]</strong> 함수나 블록 안에서 선언한 변수</li>
+<li><strong>[static 지역]</strong> 함수 안에서 선언했지만 수명은 전역인 변수</li>
+<li><strong>[매개변수]</strong> 호출할 때 값이 복사되는 지역 변수</li>
+<li><strong>[힙]</strong> <code>malloc</code>이 준 블록</li>
+<li><strong>[static 함수]</strong> 이 파일 안에서만 보이는 함수</li>
+</ul>
+
+<p>원칙은 변수에 대해 "어디서 보이나(범위)"와 "언제까지 사나(수명)"를 따로 묻는 것입니다. 포인터 변수와 그것이 가리키는 대상도 따로 셉니다. 변수를 가르는 축은 셋입니다. <strong>범위</strong>(scope)는 이름이 어디서 보이는가, <strong>저장 기간</strong>은 언제까지 사는가, <strong>연결</strong>은 다른 파일에서도 같은 것인가입니다.</p>
+
+<table>
+<thead>
+<tr><th></th><th>함수 밖에서 선언</th><th>함수 안에서 선언</th></tr>
+</thead>
+<tbody>
+<tr><td><code>static</code> 없음</td><td>[전역] 파일 범위 · 정적 수명(데이터·BSS) · 다른 파일에서도 보임</td><td>[지역] 블록 범위 · 자동 수명(스택 프레임)</td></tr>
+<tr><td><code>static</code> 있음</td><td>전역이되 이 파일 안에서만 보임(내부 연결)</td><td>[static 지역] 블록 범위 · 정적 수명(데이터·BSS)</td></tr>
+</tbody>
+</table>
+
+<p>세 축을 섞지 않는 것이 핵심입니다. 같은 <code>static</code>이라도 함수나 전역 변수 앞에서는 "이 파일 안에서만", 함수 안 변수 앞에서는 "수명이 전역"이라는 서로 다른 뜻입니다. 특히 헷갈리기 쉬운 것이 static 지역으로, 선언 위치는 함수 안이라 범위는 블록이지만 수명과 놓이는 구역은 전역과 같습니다.</p>
+
+<p>예제에서 하나씩 확인할 빠른 규칙은 여섯 가지입니다.</p>
+
+<ul>
+<li>괄호 안 매개변수는 지역 변수입니다. 호출할 때 값이 복사됩니다. 다만 포인터 매개변수는 호출자의 변수를 가리킬 수 있습니다.</li>
+<li><code>for</code>·<code>if</code>·<code>while</code>·<code>else</code>의 중괄호 안에서 선언한 변수는 그 블록이 끝나면 사라집니다. 그래서 다른 블록에서 같은 이름을 다시 쓸 수 있습니다.</li>
+<li>포인터 변수와 가리키는 대상은 따로 셉니다. 변수는 스택에, <code>malloc</code> 블록은 힙에, 문자열 리터럴은 읽기 전용 데이터에 있습니다.</li>
+<li>배열 지역 변수(<code>char line[256]</code>, <code>int fds[1024]</code>)는 그 크기만큼 통째로 스택에 있습니다.</li>
+<li><code>errno</code>는 헤더가 제공하는 특별한 이름입니다. 전역처럼 쓰지만 스레드마다 하나씩 있습니다.</li>
+<li><code>fork</code> 뒤에는 같은 지역 변수가 두 프로세스에 각각 존재하며 값이 다를 수 있습니다(reap_show의 <code>child</code>).</li>
+</ul>
+
+<p>이번 차시의 다섯 예제에는 전역 변수가 하나도 없습니다. 함수 밖에 있는 것은 헤더, 주석, 타입 정의, static 함수뿐입니다. 예제마다 눈여겨볼 변수는 다음과 같습니다.</p>
+
+<table>
+<thead>
+<tr><th>예제</th><th>static 함수</th><th>눈여겨볼 변수</th></tr>
+</thead>
+<tbody>
+<tr><td>pagetouch</td><td><code>rss_kib</code>, <code>report</code></td><td><code>buf</code>: 변수는 스택 8바이트, 블록은 힙 64 MiB</td></tr>
+<tr><td>pstat</td><td><code>read_stat</code></td><td><code>ps</code>: 호출자 변수를 가리키는 포인터. <code>open</code>·<code>close</code>: 함수를 가리는 지역 변수</td></tr>
+<tr><td>cpu_wait</td><td><code>now_sec</code>, <code>tv</code>, <code>run</code></td><td><code>modes[]</code>: 배열은 스택, 리터럴은 읽기 전용 데이터</td></tr>
+<tr><td>reap_show</td><td><code>flush_or_die</code>, <code>zombie</code>, <code>orphan</code></td><td><code>child</code>: fork 뒤 두 프로세스가 각자 사본</td></tr>
+<tr><td>limit_lab</td><td><code>lower_soft</code>, <code>nofile</code>, <code>as_limit</code>, <code>cpu_limit</code></td><td><code>value</code>: 고쳐도 호출자가 모르는 매개변수 사본</td></tr>
+</tbody>
+</table>
+
+<h3>pagetouch 코드 읽기</h3>
+
+<p><a href="pagetouch.html">pagetouch.c</a>는 94행이며, 보조 함수 둘(<code>rss_kib</code>, <code>report</code>)이 static 함수이고 큰 힙 블록 하나를 지역 포인터 <code>buf</code>가 가리키는 구조입니다. 헤더 가운데 <code>sys/resource.h</code>는 <code>getrusage</code>를, <code>unistd.h</code>는 <code>sysconf</code>를 위해 넣었습니다. 파일 첫머리의 주석은 가설과 두 출처를 밝힙니다. minflt는 표준 API인 <code>getrusage</code>에서, VmRSS는 Linux의 <code>/proc/self/status</code>에서 읽으며, <code>/proc</code>가 없으면 <code>rss_kib=unavailable</code>로 표시합니다.</p>
+
+<ul>
+<li><strong><code>rss_kib</code></strong>: <code>/proc/self/status</code>를 열지 못하면 -1을 돌려주어 "알 수 없음"을 알립니다. <code>char line[256]</code>은 지역 배열이라 256바이트가 통째로 스택에 있습니다. <code>sizeof line</code>이 256인 것도 포인터가 아니라 배열이기 때문입니다. <code>VmRSS:</code>로 시작하는 행을 찾아 <code>strtol</code>로 숫자를 꺼냅니다.</li>
+<li><strong><code>report</code></strong>: 매개변수 <code>stage</code>는 호출자가 넘긴 문자열 리터럴(<code>"start"</code> 등)을 가리키며, 리터럴 자체는 읽기 전용 데이터 구역에 있습니다. 지역 변수 <code>ru</code>는 <code>getrusage</code>가 채우는 구조체입니다. 여기의 <code>kib</code>는 <code>rss_kib</code> 안의 <code>kib</code>와 이름만 같을 뿐 다른 함수의 다른 변수입니다.</li>
+<li><strong>인자와 페이지 크기</strong>: <code>mib</code>의 기본값은 64이고 인자로 1–1024를 받습니다. <code>strtol</code>에 쓰는 <code>end</code>는 <code>if</code> 블록 안에서만 사는 지역 변수입니다. 페이지 크기는 <code>long page = sysconf(_SC_PAGESIZE);</code>로 실행 중에 얻으며, 상수 4096을 코드에 박지 않습니다. 페이지 크기는 시스템마다 다르기 때문입니다.</li>
+<li><strong>크기 계산과 malloc</strong>: <code>size</code>와 <code>pages</code>는 <code>size_t</code>로 계산해 넘침을 막습니다. <code>buf</code>는 꼬리표가 둘입니다. 포인터 변수 자체는 스택에 8바이트로 있고, 그것이 가리키는 64 MiB 블록은 힙(mmap 구역)에 있습니다. <code>volatile</code>은 가리키는 바이트에 대한 쓰기를 지우지 말라는 뜻입니다.</li>
+<li><strong>건드리기와 해제</strong>: 세 <code>for</code> 루프의 <code>i</code>는 각각 별개의 변수입니다. <code>free</code>는 힙 블록을 반납할 뿐이고, <code>buf</code> 변수 자체는 <code>main</code>이 끝날 때 사라집니다. 마지막에 <code>fflush(stdout)</code>의 결과까지 검사하고 0으로 끝납니다.</li>
+</ul>
+
+<h2>2부 상태와 CPU: /proc/PID/stat 해석</h2>
+
+<p>2부에서는 한 줄짜리 <code>/proc/PID/stat</code>를 파싱해 %CPU를 계산하고, 문맥 교환 횟수로 프로그램이 어떻게 시간을 보내는지 읽습니다.</p>
+
+<h3>stat 한 줄의 필드</h3>
+
+<p><code>/proc/PID/stat</code>는 공백으로 구분된 숫자가 한 줄로 늘어선 파일입니다. 실행 파일 이름이 <code>a) b</code>인 sleep 프로세스의 실제 줄은 <code>121302 (a) b) S 113791 …</code>로 시작합니다. 필드 번호는 <code>man 5 proc_pid_stat</code> 기준으로 1부터 세며, 이번 차시에 쓰는 필드는 다음과 같습니다.</p>
+
+<table>
+<thead>
+<tr><th>번호</th><th>이름</th><th>뜻</th></tr>
+</thead>
+<tbody>
+<tr><td>3</td><td>state</td><td>상태 문자(ps STAT의 첫 글자)</td></tr>
+<tr><td>10 · 12</td><td>minflt · majflt</td><td>누적 폴트 수(<code>getrusage</code>와 같은 카운터)</td></tr>
+<tr><td>14 · 15</td><td>utime · stime</td><td>사용자 모드·커널 모드 CPU 시간. 단위는 클럭 틱</td></tr>
+<tr><td>22</td><td>starttime</td><td>부팅 후 몇 틱에 시작했나</td></tr>
+<tr><td>23 · 24</td><td>vsize · rss</td><td>가상 크기(바이트) · 상주 페이지 수(쪽)</td></tr>
+</tbody>
+</table>
+
+<h3>comm 함정: 괄호와 공백</h3>
+
+<p>두 번째 필드 comm은 괄호로 감싼 실행 파일 이름입니다. 문제는 이름이 자유롭다는 점입니다. 실행 파일 이름에는 공백과 괄호가 들어갈 수 있습니다. 그래서 공백으로 단순히 나누면 틀립니다. 위의 <code>a) b</code> 예에서 awk의 <code>$3</code>은 <code>b)</code>가 되었지만, 실제 상태는 S입니다.</p>
+
+<p>올바른 방법은 <strong>마지막 <code>)</code>를 찾는 것</strong>입니다. comm은 첫 <code>(</code>와 마지막 <code>)</code> 사이이고, 나머지 필드는 마지막 <code>)</code> 뒤에서부터 공백으로 나눕니다. pstat은 <code>strrchr(line, ')')</code>로 자르기 때문에 같은 프로세스에서 state=S를 바르게 읽었습니다.</p>
+
+<h3>틱에서 초로, 초에서 %CPU로</h3>
+
+<p>utime과 stime의 단위인 <strong>클럭 틱</strong>은 CPU 시간의 단위이며, 초당 틱 수는 <code>sysconf(_SC_CLK_TCK)</code>로 얻습니다. 실습 서버에서 <code>getconf CLK_TCK</code>는 100입니다. 계산은 세 단계입니다.</p>
+
+<ol>
+<li><strong>틱 → 초</strong>: utime 필드가 219이면 219 ÷ 100 = 2.19초입니다.</li>
+<li><strong>1초 뒤 다시 읽기</strong>: utime이 319가 되었다면 차이 Δ = 319 − 219 = 100틱입니다.</li>
+<li><strong>%CPU</strong>: 100 × Δ ÷ (CLK_TCK × 간격 1초) = 100%입니다.</li>
+</ol>
+
+<p>stat의 값은 시작부터의 누적값이므로, 누적값 둘의 차이를 간격으로 나눠야 "지금"의 사용률이 됩니다. 그리고 %CPU는 100%를 넘을 수 있습니다. 멀티스레드 프로그램은 코어 여러 개를 쓰므로 200%도 가능합니다.</p>
+
+<h3>pstat: stat 한 줄 파싱</h3>
+
+<p><a href="pstat.html">pstat</a>은 stat 한 줄을 해석해 미니 top 한 줄을 만드는 프로그램입니다. 파싱의 핵심 부분은 다음과 같습니다.</p>
+
+<pre><code>char *open = strchr(line, '(');
+char *close = strrchr(line, ')');       /* 마지막 ) */
+if (open == NULL || close == NULL || close &lt; open)
+    return -1;
+memcpy(ps-&gt;comm, open + 1, n);          /* 이름 복사 */
+/* 필드 3(state)부터: %*는 읽고 버린다 */
+int got = sscanf(close + 2,
+    "%c %ld %*d %*d %*d %*d %*u %lu %*u %lu %*u %lu %lu "
+    "%*d %*d %*d %*d %ld %*d %*u %lu %ld",
+    &amp;ps-&gt;state, &amp;ps-&gt;ppid, &amp;ps-&gt;minflt, &amp;ps-&gt;majflt,
+    &amp;ps-&gt;utime, &amp;ps-&gt;stime, &amp;ps-&gt;threads, &amp;ps-&gt;vsize,
+    &amp;ps-&gt;rss_pages);
+return got == 9 ? 0 : -1;</code></pre>
+
+<ul>
+<li><strong><code>strrchr</code></strong>: 이름 안에 <code>)</code>가 있어도 줄의 마지막 <code>)</code>는 필드 경계입니다.</li>
+<li><strong><code>%*</code>로 건너뛰기</strong>: 필요 없는 필드는 읽고 버려서 필드 번호를 맞춥니다.</li>
+<li><strong>개수 검사</strong>: <code>sscanf</code>의 반환값이 9가 아니면 형식이 예상과 다른 것이므로 실패로 처리합니다.</li>
+</ul>
+
+<p>pstat으로 두 프로세스를 지켜본 결과는 대조적입니다. 바쁘게 계산하는 프로세스는 상태가 R, %CPU가 100%이고 utime만 1초에 1.00씩 늘며 커널 시간은 0입니다.</p>
+
+<pre><code>state=R cpu=100% utime=2.19 stime=0.00 ...
+state=R cpu=100% utime=3.19 stime=0.00 ...
+state=R cpu=100% utime=4.19 stime=0.00 ...</code></pre>
+
+<p>잠자는 프로세스는 상태가 S, %CPU가 0%이고 CPU 시간이 늘지 않습니다. 잠든 동안에는 틱이 쌓이지 않기 때문입니다. 두 경우 모두 rss와 minflt는 그대로였는데, 새 페이지를 건드리지 않았기 때문입니다.</p>
+
+<h3>user 시간과 system 시간</h3>
+
+<ul>
+<li><strong>user (utime)</strong>: 내 코드가 CPU에서 계산한 시간입니다. 루프, 수식, 문자열 처리가 여기에 들어갑니다.</li>
+<li><strong>sys (stime)</strong>: 내 요청으로 커널이 일한 시간입니다. <code>write</code>·<code>read</code>·<code>open</code> 같은 호출이 여기에 들어갑니다.</li>
+<li><strong>둘 다 아님</strong>: 잠든 시간은 CPU 시간이 아닙니다. 벽시계 시간만 흐릅니다.</li>
+</ul>
+
+<p><code>time</code> 명령이 보여 주는 user, sys, real이 바로 이 구분입니다. 단일 스레드 프로그램에서 real(벽시계)이 user + sys보다 크다면 그 차이만큼 기다린 시간이 있었다는 뜻입니다.</p>
+
+<h3>문맥 교환: 자발적과 비자발적</h3>
+
+<p>CPU에서 내려오는 방식은 두 가지이고, 커널은 둘을 따로 셉니다.</p>
+
+<ul>
+<li><strong>자발적(nvcsw)</strong>: 기다릴 일이 생겨 스스로 CPU를 내놓은 경우입니다. 잠들기와 I/O 대기가 해당합니다. 예를 들어 프로세스 A가 <code>read</code>에서 잠들면 A의 nvcsw가 1 늘고, A가 S 상태로 기다리는 동안 B가 실행됩니다.</li>
+<li><strong>비자발적(nivcsw)</strong>: 더 실행하고 싶었지만 빼앗긴 경우입니다. 시간 조각이 끝났거나 우선순위에 밀린 것입니다. 계산 중이던 A를 스케줄러가 빼앗으면 A의 nivcsw가 1 늘고, A는 R 상태인 채로 줄을 섰다가 다시 실행됩니다.</li>
+</ul>
+
+<p>읽는 법은 간단합니다. nvcsw가 크면 기다리는 프로그램이고, nivcsw가 크면 CPU를 두고 경쟁하는 중입니다. <code>getrusage</code>의 <code>ru_nvcsw</code>·<code>ru_nivcsw</code>와 <code>/proc/PID/status</code>의 <code>voluntary_ctxt_switches</code>·<code>nonvoluntary_ctxt_switches</code>는 같은 카운터입니다.</p>
+
+<h3>cpu_wait: 같은 1초, 다른 숫자</h3>
+
+<p><a href="cpu_wait.html">cpu_wait</a>는 같은 1초를 세 가지 방식으로 보내고, 방식마다 숫자가 어떻게 달라지는지 보여 줍니다. busy는 사용자 모드 계산을, sys는 짧은 시스템 호출을, sleep은 잠자기를 반복합니다.</p>
+
+<pre><code>/* sys 모드의 반복 본문 */
+if (write(devnull, &amp;byte, 1) == -1) { ... }
+/* sleep 모드의 반복 본문 */
+usleep(10000);                       /* 10ms */</code></pre>
+
+<ul>
+<li><strong>busy</strong>: user 1.00, nvcsw 0입니다. 한 번도 스스로 양보하지 않았습니다.</li>
+<li><strong>sys</strong>: sys가 0.67입니다. 1바이트 <code>write</code>를 반복하면 시간 대부분을 커널에서 보냅니다.</li>
+<li><strong>sleep</strong>: CPU 시간 0초, nvcsw 100입니다. 10ms 잠을 100번 잤으므로 자발적 교환이 100번입니다.</li>
+</ul>
+
+<h3>"느리다"를 숫자로 진단하기</h3>
+
+<p>지금까지의 숫자를 모으면 "프로그램이 느려요"라는 말을 단계적으로 좁힐 수 있습니다. 먼저 %CPU가 100%에 가까운지 봅니다.</p>
+
+<ul>
+<li><strong>예 — CPU를 쓰고 있습니다(R).</strong>
+<ul>
+<li>user가 크면 계산이 많은 것입니다. 알고리즘을 살피고 프로파일러를 씁니다.</li>
+<li>sys가 크면 시스템 호출이 많은 것입니다. 버퍼링하거나 묶어서 호출합니다.</li>
+</ul>
+</li>
+<li><strong>아니오 — 기다리고 있습니다.</strong>
+<ul>
+<li>상태가 S이고 nvcsw가 늘면 무엇을 기다리는지 찾습니다. wchan과 <code>/proc/PID/fd</code>가 단서입니다.</li>
+<li>상태가 D이고 majflt가 늘면 디스크, NFS, 스왑 쪽입니다. 저장 장치를 점검합니다.</li>
+</ul>
+</li>
+</ul>
+
+<p>7주차 1차시의 상태 문자와 이번 차시의 user, sys, 교환 횟수, 폴트 수가 함께 진단 도구가 됩니다.</p>
+
+<h3>wchan과 load average</h3>
+
+<ul>
+<li><strong>wchan</strong>은 프로세스가 잠든 자리입니다. <code>sleep 30</code>은 <code>hrtimer_nanosleep</code>에서 잡니다. "무엇을 기다리나"에 대한 증거가 됩니다.</li>
+<li><strong>load average</strong>는 R과 D 상태인 작업 수의 1분·5분·15분 평균입니다. Linux는 D 상태도 셉니다.</li>
+<li>load average는 <strong>코어 수와 비교</strong>해서 읽어야 합니다. 48코어 서버에서 6.28은 한가한 값입니다. <code>/proc/loadavg</code>의 넷째 칸 <code>29/4234</code>는 지금/전체 작업 수입니다.</li>
+</ul>
+
+<h3>직접 확인 2: 상태와 CPU</h3>
+
+<pre><code>./pstat self
+../class07-01/state_show --busy 10 &gt; /dev/null &amp;
+./pstat $! 5                        # %CPU · utime 변화
+wait
+../class07-01/state_show 10 &gt; /dev/null &amp;
+./pstat $! 3 ; wait
+
+cp /bin/sleep "./a) b" ; "./a) b" 5 &amp;
+awk '{print $3, $4}' /proc/$!/stat # 함정
+./pstat $!                          # 바른 파싱
+wait ; rm "./a) b"
+
+./cpu_wait ; cat /proc/loadavg</code></pre>
+
+<ul>
+<li><strong>pstat 두 모드</strong>: R과 S에서 utime, stime, %CPU가 어떻게 다른지 적습니다.</li>
+<li><strong>comm 함정</strong>: awk 결과와 pstat 결과를 나란히 적고 원인을 설명합니다.</li>
+<li><strong>cpu_wait</strong>: 세 모드의 user, sys, nvcsw를 예측한 뒤 실행해 비교합니다.</li>
+</ul>
+
+<p>기록은 <code>REPORT.md</code>의 실습 2 칸에 합니다.</p>
+
+<h3>pstat 코드 읽기</h3>
+
+<p><a href="pstat.html">pstat.c</a>는 117행입니다. 파일 범위에 타입 정의가 하나 있고, <code>read_stat</code>이 포인터 매개변수로 <code>main</code>의 지역 변수를 채우는 구조입니다.</p>
+
+<ul>
+<li><strong><code>struct pstat</code></strong>: 파일 범위에 있지만 변수가 아니라 틀(타입 정의)입니다. 실제 변수는 <code>main</code>의 <code>struct pstat prev, cur;</code>에서 만들어지며, 구조체 둘이 통째로 스택에 놓입니다. 그래서 이 파일에도 전역 변수는 없습니다.</li>
+<li><strong><code>read_stat(long pid, struct pstat *ps)</code></strong>: <code>pid</code>는 값이 복사되는 매개변수입니다. <code>ps</code>는 포인터이고 호출자 <code>main</code>의 <code>prev</code> 또는 <code>cur</code>를 가리킵니다. 이 함수가 <code>ps-&gt;…</code>에 쓰면 <code>main</code>의 변수가 채워집니다. <code>sscanf</code>의 대상 아홉 개도 모두 <code>ps-&gt;</code>, 곧 호출자의 변수입니다.</li>
+<li><strong><code>path[64]</code>, <code>line[1024]</code></strong>: 지역 배열 둘로, 합쳐 약 1 KiB가 스택에 있습니다. 경로를 만들어 한 줄을 읽고 바로 파일을 닫습니다.</li>
+<li><strong><code>open</code>, <code>close</code></strong>: 첫 <code>(</code>와 마지막 <code>)</code>를 가리키는 지역 포인터인데, 이름이 함수 <code>open(2)</code>·<code>close(2)</code>와 같습니다. 이 함수 안에서는 변수가 함수를 가립니다(섀도잉). 경고는 나지 않지만 헷갈리기 쉬운 자리입니다.</li>
+<li><strong>이름 복사</strong>: 이름 길이 <code>n</code>이 <code>comm</code> 버퍼보다 길면 버퍼 크기에 맞춰 자르고, 복사한 뒤 종료 문자를 붙입니다.</li>
+<li><strong><code>main</code>의 인자</strong>: 첫 인자는 <code>self</code> 또는 양의 정수 PID이고, 둘째 인자 <code>samples</code>는 기본 1, 범위 1–60입니다. <code>main</code>의 <code>pid</code>는 <code>read_stat</code>의 매개변수 <code>pid</code>와 이름만 같은 다른 변수입니다.</li>
+<li><strong>단위</strong>: <code>tick</code>과 <code>page</code>는 <code>sysconf(_SC_CLK_TCK)</code>와 <code>sysconf(_SC_PAGESIZE)</code>로 실행 중에 얻습니다.</li>
+<li><strong>첫 표본과 반복</strong>: 첫 읽기에 실패하면 Linux에서는 오류를 내고 1로 끝나며, 그 밖의 시스템에서는 <code>stat=unsupported (no /proc on this system)</code>을 출력하고 0으로 끝납니다. 표본이 둘 이상이면 1초 쉬고 다시 읽고, 그사이 프로세스가 사라졌으면 <code>gone</code>을 출력하고 멈춥니다.</li>
+<li><strong>%CPU 계산</strong>: 루프 몸통의 지역 변수 <code>d</code>가 두 표본의 틱 차이이며 매 회 새로 만들어집니다. 표본이 하나면 비교할 구간이 없으므로 %CPU 자리에 <code>-</code>를 찍습니다. 출력할 때 틱은 초로, 바이트와 쪽은 KiB로 바꿉니다.</li>
+<li><strong><code>prev = cur;</code></strong>: 구조체를 통째로 복사하는 대입입니다. 이번 표본이 다음 회의 기준이 됩니다.</li>
+</ul>
+
+<pre><code>unsigned long d = (cur.utime + cur.stime) - (prev.utime + prev.stime);</code></pre>
+
+<h3>cpu_wait 코드 읽기</h3>
+
+<p><a href="cpu_wait.html">cpu_wait.c</a>는 90행이며 static 함수 셋(<code>now_sec</code>, <code>tv</code>, <code>run</code>)과 지역 변수뿐입니다. 세 모드로 1초씩 돌면서 <code>getrusage</code>의 전후 차이를 보고합니다.</p>
+
+<ul>
+<li><strong><code>now_sec</code></strong>: <code>clock_gettime(CLOCK_MONOTONIC, …)</code>로 현재 시각을 초로 돌려줍니다. 1차시의 state_show에 있던 것과 같은 함수입니다.</li>
+<li><strong><code>tv(struct timeval t)</code></strong>: 매개변수 <code>t</code>로 timeval 구조체가 통째로 복사되어 들어옵니다. 포인터가 아니므로 호출자의 변수는 바뀌지 않습니다.</li>
+<li><strong><code>run</code></strong>: <code>struct rusage a, b</code>가 전·후 표본입니다. <code>start</code>와 <code>stop</code>이 기준점과 마감이고, 마감까지 모드별 본문을 반복합니다. <code>volatile unsigned long spin</code>은 busy 모드에서 증가시키는 변수로, 결과를 쓰지 않아도 증가가 컴파일러에 의해 지워지지 않게 합니다. <code>byte</code>는 sys 모드의 <code>write</code>가 보낼 1바이트입니다.</li>
+<li><strong>차이 계산</strong>: <code>wall</code>은 벽시계 경과 시간입니다. user, sys, nvcsw, nivcsw는 모두 <code>b − a</code>, 곧 끝 표본에서 시작 표본을 뺀 값으로 출력합니다. 누적값이 아니라 그 모드가 돈 1초 동안의 값만 보기 위해서입니다.</li>
+<li><strong><code>modes[]</code></strong>: <code>const char *modes[] = {"busy", "sys", "sleep"};</code>에서 포인터 세 개짜리 배열은 스택에, 가리키는 문자열 리터럴 셋은 읽기 전용 데이터 구역에 있습니다.</li>
+<li><strong><code>only</code>, <code>devnull</code></strong>: <code>only</code>는 인자가 있으면 <code>argv[1]</code>, 없으면 NULL이며, 선택된 모드만 <code>run</code>을 부릅니다. <code>devnull</code>은 <code>/dev/null</code>을 연 FD 번호이고, <code>main</code>의 이 값이 <code>run</code>의 매개변수로 복사됩니다. 끝에서 <code>close</code>의 결과까지 검사합니다.</li>
+</ul>
+
+<h2>3부 수명: 좀비와 고아</h2>
+
+<p>3부에서는 종료와 회수 사이의 상태, 그리고 부모가 먼저 끝난 경우를 직접 만들어 봅니다. <code>fork</code>와 <code>waitpid</code>의 정식 계약은 10주차에 다루며, 여기서 <a href="reap_show.html">reap_show</a>는 두 경우를 만들어 주는 관찰 도구입니다.</p>
+
+<h3>부모와 자식, 누가 먼저 끝나나</h3>
+
+<ul>
+<li><strong>자식이 먼저 끝나는 경우</strong>(<code>reap_show zombie</code>): 자식은 끝났지만 부모가 잠든 채 회수를 미룹니다. 그동안 자식은 종료 상태 7을 들고 Z(좀비) 상태로 기다립니다. 부모가 <code>waitpid</code>로 종료 상태 7을 받아 가면 자식은 사라집니다.</li>
+<li><strong>부모가 먼저 끝나는 경우</strong>(<code>reap_show orphan</code>): 자식은 고아가 되어 입양됩니다. PPID가 1(또는 subreaper)로 바뀌고, 자식이 끝나면 새 부모가 회수합니다.</li>
+</ul>
+
+<p>어느 경우든 종료 상태는 누군가 회수합니다. 문제가 되는 것은 <strong>살아 있는 부모가 회수하지 않을 때뿐</strong>입니다.</p>
+
+<h3>reap_show zombie: 회수를 미루기</h3>
+
+<pre><code>pid_t child = fork();
+if (child == -1) {
+    perror("fork");
+    return 1;
+}
+if (child == 0)
+    _exit(7);                /* 자식: 즉시 종료 상태 7 */
+printf("parent=%ld child=%ld (...)\n",
+       (long)getpid(), (long)child);
+unsigned int left = (unsigned int)seconds;
+while (left != 0)
+    left = sleep(left);      /* 부모: 회수를 미룬다 */
+int status;
+if (waitpid(child, &amp;status, 0) == -1) { ... }
+if (WIFEXITED(status))
+    printf("reaped child=%ld exit_status=%d\n",
+           (long)child, WEXITSTATUS(status));</code></pre>
+
+<ul>
+<li><strong>fork의 두 반환</strong>: <code>fork</code>는 자식에게는 0을, 부모에게는 자식의 PID를 돌려줍니다.</li>
+<li><strong><code>_exit(7)</code></strong>: 자식은 stdio 정리 없이 종료 상태 7로 즉시 끝납니다.</li>
+<li><strong><code>waitpid</code></strong>: 부모가 종료 상태를 읽어 가면 좀비 항목이 지워집니다.</li>
+</ul>
+
+<p>실행 중에 <code>ps</code>로 보면 자식의 상태가 Z이고, 명령 줄 대신 <code>[이름]</code>과 <code>&lt;defunct&gt;</code>가 표시됩니다. 좀비의 PPID는 부모인 reap_show를 가리킵니다. 6초를 주고 실행한 화면에서는 6초 뒤 <code>waitpid</code>가 7을 받았고 좀비가 사라졌습니다.</p>
+
+<h3>고아와 입양</h3>
+
+<p>부모가 끝나면 커널이 자식의 PPID를 바꿔 줍니다. 실습 서버의 예에서 자식 125283의 PPID는 부모가 끝나기 전에는 reap_show(125282)였고, 2초 뒤에는 systemd(PID 1)였습니다.</p>
+
+<ul>
+<li><strong>누가 입양하나</strong>: 가장 가까운 subreaper 조상이고, 없으면 PID 1입니다. subreaper는 <code>prctl(PR_SET_CHILD_SUBREAPER)</code>로 자손 고아를 대신 맡겠다고 선언한 프로세스입니다.</li>
+<li><strong>회수 보장</strong>: 입양한 쪽이 <code>wait</code>하므로 고아는 좀비로 쌓이지 않습니다.</li>
+</ul>
+
+<p>실습 서버에도 <code>systemd --user</code>가 있지만 ssh 세션은 그 자손이 아니어서 PID 1이 입양했습니다. 데스크톱 세션에서는 <code>systemd --user</code>가 입양할 수 있습니다.</p>
+
+<p>orphan 모드의 화면에서 눈여겨볼 점은 세 가지입니다. 첫째, 셸 프롬프트가 먼저 돌아옵니다. 셸은 부모만 기다리므로, 자식의 출력은 프롬프트 뒤에 붙어 나옵니다. 둘째, 2초 뒤 자식의 부모가 systemd(PID 1)로 바뀌어 있습니다. 셋째, <code>getppid</code>라는 같은 호출이 시간에 따라 다른 값을 돌려줄 수 있습니다.</p>
+
+<h3>좀비가 쌓이는 서버</h3>
+
+<p>요청마다 <code>fork</code>하면서 <code>wait</code>하지 않는 서버를 생각해 보겠습니다. 좀비 하나는 프로세스 표 항목 하나와 PID 하나입니다. 메모리는 거의 쓰지 않지만 PID 하나를 계속 차지합니다. 좀비가 쌓여 사용자당 프로세스 수 한계(<code>RLIMIT_NPROC</code>)나 PID 한계에 닿으면 <code>fork</code>가 -1을 돌려주고 <code>errno</code>가 <code>EAGAIN</code>이 되어, 새 프로세스를 만들 수 없고 새 요청도 처리할 수 없게 됩니다.</p>
+
+<p>고칠 곳은 부모입니다. <code>waitpid</code>로 회수해야 하며(10주차), SIGCHLD로 자식의 종료를 알림 받는 방법도 있습니다(9주차). 참고로 실습 서버의 <code>/proc/PID/limits</code>에서 Max processes는 soft와 hard 모두 1029894입니다.</p>
+
+<h3>직접 확인 3: 수명</h3>
+
+<pre><code>./reap_show zombie 20 &amp;
+ps -o pid,ppid,stat,command --ppid $!     # Linux
+ps -o pid,ppid,stat,command | grep defunct # macOS
+head -3 /proc/&lt;자식PID&gt;/status
+kill -9 &lt;자식PID&gt;            # 좀비는 사라지는가?
+wait
+
+./reap_show orphan ; sleep 3
+setsid ./reap_show orphan ; sleep 3
+
+ps -eo pid,ppid,stat,command | awk '$3 ~ /^Z/'</code></pre>
+
+<ul>
+<li><strong>좀비에 kill</strong>: SIGKILL을 보내도 좀비가 남는 것을 확인하고 그 이유를 씁니다.</li>
+<li><strong>입양한 쪽</strong>: <code>ppid_after</code> 값과 그 PID의 명령을 <code>ps</code>로 확인합니다.</li>
+<li><strong>시스템의 좀비</strong>: 서버에서 Z 상태인 프로세스를 찾아 PPID로 부모를 확인합니다.</li>
+</ul>
+
+<p>기록은 <code>REPORT.md</code>의 실습 3 칸에 합니다.</p>
+
+<h3>reap_show 코드 읽기</h3>
+
+<p><a href="reap_show.html">reap_show.c</a>는 92행이며 static 함수 셋(<code>flush_or_die</code>, <code>zombie</code>, <code>orphan</code>)으로 이루어져 있습니다. 변수는 모두 지역인데, <code>fork</code> 뒤에는 같은 지역 변수가 두 프로세스에 각각 존재하며 값이 다르다는 점이 이 예제의 읽을거리입니다. <code>sys/wait.h</code>는 <code>waitpid</code>와 <code>WIFEXITED</code>·<code>WEXITSTATUS</code>를 위해 넣었습니다.</p>
+
+<ul>
+<li><strong><code>flush_or_die</code></strong>: 지역 변수가 없는 함수입니다. <code>fork</code> 전후의 출력이 섞이지 않도록 매번 stdout을 비웁니다.</li>
+<li><strong><code>zombie</code>의 <code>child</code></strong>: <code>pid_t child = fork();</code> 뒤에는 두 프로세스가 각자 이 변수의 사본을 가집니다. 자식의 사본은 0, 부모의 사본은 자식의 PID입니다. 같은 이름, 같은 줄이지만 값이 다른 두 변수입니다.</li>
+<li><strong>자식 쪽 분기</strong>: 자식은 <code>_exit(7)</code>로 즉시 끝나므로, 그 아래의 코드는 부모만 실행합니다. 부모는 자신과 자식의 PID, 그리고 관찰에 쓸 <code>ps</code> 명령을 출력하고 flush한 뒤 회수 없이 잠듭니다. <code>left = sleep(left)</code>를 0이 될 때까지 반복해 지정한 시간을 다 채웁니다.</li>
+<li><strong>회수</strong>: 지역 변수 <code>status</code>를 <code>waitpid</code>가 채웁니다. 정상 종료였다면 <code>WEXITSTATUS</code>로 7을 꺼내고, 이때 좀비 항목이 사라집니다.</li>
+<li><strong><code>orphan</code>의 flush</strong>: <code>fork</code> 전에 먼저 stdout을 비웁니다. 비우지 않으면 버퍼가 자식에게 복제되어 같은 내용이 두 번 출력될 수 있기 때문입니다.</li>
+<li><strong><code>orphan</code>의 <code>child</code></strong>: <code>zombie</code>의 <code>child</code>와 이름만 같은, 다른 함수의 다른 변수입니다. 역시 <code>fork</code> 뒤 두 사본이 생깁니다. 부모(양수)는 한 줄 출력하고 <code>return</code>하여 <code>main</code>으로 돌아가 종료합니다. 자식은 <code>ppid_before</code>를 출력하고 2초 잔 뒤 <code>ppid_after</code>를 다시 출력하고 <code>_exit</code>합니다.</li>
+<li><strong><code>main</code></strong>: zombie 모드의 <code>seconds</code>는 <code>if</code> 블록 안 지역 변수로 기본 10, 범위 0–600이며, 이 값이 <code>zombie</code>의 매개변수로 복사됩니다. 인자가 잘못되면 -1로 표시해 두었다가 사용법을 출력하고 2로 끝납니다.</li>
+</ul>
+
+<h2>4부 한계: 넘으면 무슨 일이</h2>
+
+<p>4부에서는 soft 한계를 낮춘 뒤 일부러 넘겨, 실제로 무엇이 일어나는지 확인합니다.</p>
+
+<h3>한계별로 넘으면 일어나는 일</h3>
+
+<table>
+<thead>
+<tr><th>한계 (<code>RLIMIT_</code>)</th><th>무엇을 세나</th><th>넘으면</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>NOFILE</strong></td><td>열 수 있는 FD 번호의 상한</td><td><code>open</code>·<code>socket</code> 등이 -1, <code>errno</code> = <code>EMFILE</code></td></tr>
+<tr><td><strong>AS</strong></td><td>가상 주소 공간 크기</td><td><code>malloc</code>·<code>mmap</code>이 실패, <code>errno</code> = <code>ENOMEM</code></td></tr>
+<tr><td><strong>CPU</strong></td><td>누적 CPU 시간(초)</td><td>soft: SIGXCPU(기본 동작: 종료) · hard: SIGKILL</td></tr>
+<tr><td>STACK</td><td>스택 크기</td><td>스택을 더 못 늘림 → SIGSEGV</td></tr>
+<tr><td>NPROC</td><td>사용자의 프로세스 수</td><td><code>fork</code>가 -1, <code>errno</code> = <code>EAGAIN</code></td></tr>
+<tr><td>FSIZE</td><td>만들 수 있는 파일 크기</td><td><code>write</code>가 넘는 순간 SIGXFSZ</td></tr>
+<tr><td>CORE</td><td>코어 덤프 파일 크기</td><td>0이면 코어 파일을 만들지 않음</td></tr>
+</tbody>
+</table>
+
+<p>자세한 내용은 <code>man 2 getrlimit</code>에 있습니다. 이 가운데 NOFILE, AS, CPU 세 가지를 <a href="limit_lab.html">limit_lab</a>으로 실험합니다. 표에서 보듯 한계를 넘은 결과는 두 갈래입니다. 호출이 <code>errno</code>와 함께 실패하거나, 시그널을 받습니다.</p>
+
+<h3>limit_lab: soft를 낮추고 넘기기</h3>
+
+<pre><code>static long long lower_soft(int resource, rlim_t value)
+{
+    struct rlimit lim;
+    if (getrlimit(resource, &amp;lim) == -1) { ... }
+    if (lim.rlim_max != RLIM_INFINITY &amp;&amp; value &gt; lim.rlim_max)
+        value = lim.rlim_max; /* soft는 hard를 넘을 수 없다 */
+    lim.rlim_cur = value;
+    if (setrlimit(resource, &amp;lim) == -1) { ... }
+    return (long long)value;    /* 실제로 적용한 값 */
+}
+
+/* nofile 모드: 실패할 때까지 연다 */
+while (count &lt; 1024) {
+    int fd = open("/dev/null", O_RDONLY);
+    if (fd == -1) { printf(... errno ...); break; }
+    fds[count++] = fd;
+}</code></pre>
+
+<ul>
+<li><strong>읽고 고치고 쓰기</strong>: <code>getrlimit</code>로 현재의 soft·hard 쌍을 읽고, soft만 바꿔 <code>setrlimit</code>합니다.</li>
+<li><strong>hard로 자르기</strong>: soft는 hard를 넘을 수 없으므로, 요청이 hard보다 크면 hard로 낮추고 실제로 적용한 값을 돌려줍니다.</li>
+<li><strong>정리</strong>: 연 FD를 배열에 모아 두었다가 실험 뒤 모두 닫습니다.</li>
+</ul>
+
+<h3>세 한계를 넘긴 결과</h3>
+
+<ul>
+<li><strong>NOFILE 16</strong>: 13번 열고 <code>EMFILE</code>(24)로 실패했습니다. 이미 열려 있는 0·1·2와 새로 연 3~15를 합쳐 16개이기 때문입니다.</li>
+<li><strong>AS 64 MiB</strong>: 128 MiB <code>malloc</code>이 NULL을 돌려주었고 <code>errno</code>는 <code>ENOMEM</code>(12)입니다. 호출이 실패로 돌아온 것이므로 프로그램이 처리할 수 있습니다.</li>
+<li><strong>CPU 1초</strong>: SIGXCPU(24)로 끝났습니다. 셸에서 본 종료 상태는 152 = 128 + 24입니다.</li>
+</ul>
+
+<h3>한계는 상속된다</h3>
+
+<p><code>ulimit</code>은 셸 내장 명령입니다. 셸 자신의 한계를 바꾸고, 그 뒤에 만들어지는 자식이 그 값을 물려받습니다. bash 서브셸에서 <code>ulimit -n 20</code>을 하면 soft와 hard가 모두 20이 되고, 그 안에서 실행한 <code>limit_lab nofile 1024</code>는 20·20을 물려받아 요청 1024가 hard 20으로 잘립니다.</p>
+
+<ul>
+<li><strong>bash의 <code>ulimit -n</code></strong>: <code>-S</code>나 <code>-H</code> 없이 쓰면 soft와 hard를 함께 바꿉니다. hard를 낮춘 것이므로 되돌릴 수 없습니다.</li>
+<li><strong>괄호 서브셸</strong>: <code>( ulimit -n 20; ... )</code>처럼 쓰면 한계가 서브셸에서만 바뀌고 원래 셸은 그대로 남습니다.</li>
+</ul>
+
+<p>같은 명령을 macOS zsh에서 실행하면 soft만 바뀌어 1024가 그대로 적용되었습니다.</p>
+
+<h3>/proc/PID/limits와 prlimit</h3>
+
+<ul>
+<li><strong>다른 프로세스의 한계</strong>: <code>/proc/PID/limits</code>로 실행 중인 어떤 프로세스든 한계를 읽을 수 있습니다.</li>
+<li><strong><code>prlimit</code></strong>: util-linux 도구입니다. 실행 중인 프로세스의 한계를 바꿀 수도 있습니다.</li>
+<li><strong>core 0</strong>: 코어 파일 크기의 soft 한계가 0이라서 기본으로는 코어 파일을 만들지 않습니다.</li>
+</ul>
+
+<h3>직접 확인 4: 한계</h3>
+
+<pre><code>./limit_lab nofile 16       # 몇 번 열까? 마지막 FD는?
+./limit_lab nofile 4
+./limit_lab as 64            # Linux
+./limit_lab cpu 1 ; echo $?
+( ulimit -n 20; ./limit_lab nofile 1024 )
+ulimit -n                    # 원래 셸은 그대로인가?
+
+head -9 /proc/$$/limits
+prlimit --pid $$</code></pre>
+
+<ul>
+<li><strong>예측</strong>: <code>nofile N</code>에서 열리는 개수와 마지막 FD 번호를 먼저 적습니다.</li>
+<li><strong>종료 상태</strong>: cpu 모드의 <code>$?</code>를 시그널 번호로 해석합니다(<code>kill -l 152</code>).</li>
+<li><strong>상속</strong>: 서브셸 안팎의 <code>ulimit -n</code>을 비교해 적습니다.</li>
+</ul>
+
+<p>기록은 <code>REPORT.md</code>의 실습 4 칸에 합니다.</p>
+
+<h3>limit_lab 코드 읽기</h3>
+
+<p><a href="limit_lab.html">limit_lab.c</a>는 108행이며 static 함수 넷(<code>lower_soft</code>, <code>nofile</code>, <code>as_limit</code>, <code>cpu_limit</code>)과 지역 변수뿐입니다. 파일 첫머리의 주석은 세 모드와 적용 범위를 설명합니다. 낮춘 한계는 이 프로세스와 이후의 자식에만 적용되고 셸에는 영향이 없습니다.</p>
+
+<ul>
+<li><strong><code>lower_soft</code>의 <code>value</code></strong>: 매개변수 <code>value</code>는 호출자 값의 사본입니다. hard로 자르는 줄에서 <code>value</code>를 바꿔도 호출자는 그 사실을 모릅니다. 그래서 함수가 실제 적용값을 반환값으로 돌려줍니다(실패하면 -1). 지역 변수 <code>lim</code>이 soft·hard 쌍을 담습니다.</li>
+<li><strong><code>nofile</code></strong>: <code>soft</code>는 실제로 적용된 soft 한계입니다. <code>int fds[1024]</code>는 int 1024개, 4 KiB가 통째로 스택에 있는 지역 배열입니다. <code>fd</code>는 <code>while</code> 블록 안에서 매 회 새로 만들어집니다. <code>open</code>이 실패하면 <code>errno</code>와 그 문자열을 출력하고 루프를 빠져나오며, 그 뒤 마지막 FD와 한계를 출력하고 연 FD를 모두 닫습니다. 주석이 밝히듯 열린 개수는 N − 3(표준 스트림 셋)입니다.</li>
+<li><strong><code>as_limit</code></strong>: 인자 MiB를 바이트로 바꿔 soft AS를 낮춘 뒤, <code>want</code>에 한계의 두 배를 담아 <code>malloc</code>합니다. 호출 전에 <code>errno</code>를 0으로 둡니다. <code>p</code>는 지역 포인터이고, 성공하면 힙 블록의 주소, 실패하면 NULL입니다. 성공했을 때만 <code>free</code>합니다. 주석에 따르면 NULL과 ENOMEM이 돌아오는 것은 Linux의 결과이고 다른 시스템은 결과가 다를 수 있어서, 성공한 경우에는 <code>limit not enforced here</code>라고 출력합니다.</li>
+<li><strong><code>cpu_limit</code></strong>: soft CPU 한계를 초 단위로 낮추고, PID를 알린 뒤 flush합니다. 그다음은 <code>volatile</code> 변수 <code>spin</code>을 증가시키는, 반환하지 않는 무한 루프입니다. 이 함수는 스스로 끝나지 않고 커널이 SIGXCPU로 끝냅니다.</li>
+<li><strong><code>main</code></strong>: 인자가 둘일 때만 처리합니다. <code>end</code>, <code>v</code>, <code>valid</code> 셋 모두 <code>if</code> 블록 안의 지역 변수입니다. 모드별 범위(nofile 4–1024, as 16–4096, cpu 1–10)를 검사하고 해당 함수를 부르며, 이때 <code>v</code>가 각 함수의 매개변수로 복사됩니다. 어느 것도 맞지 않으면 사용법을 출력하고 2로 끝납니다.</li>
+</ul>
+
+<pre><code>volatile unsigned long spin = 0;
+for (;;)
+    spin++;</code></pre>
+
+<h3>코드 읽기 정리</h3>
+
+<ul>
+<li><strong>전역</strong>: 함수 밖에서 선언한 변수입니다. 이번 차시의 다섯 예제에는 하나도 없습니다.</li>
+<li><strong>지역</strong>: 함수나 블록 안에서 선언한 변수입니다. 매개변수도 지역입니다. 블록이 끝나면 사라지고, 같은 이름을 다른 블록에서 다시 쓸 수 있습니다.</li>
+<li><strong>static 지역</strong>: 선언 위치는 함수 안이지만 수명과 구역은 전역과 같습니다. 함수 앞의 <code>static</code>은 다른 뜻(이 파일 안에서만)입니다.</li>
+<li><strong>힙</strong>: 변수가 아니라 블록입니다. 지역 포인터가 가리키며, <code>free</code>할 때까지 남습니다.</li>
+</ul>
+
+<p>"지역 변수가 두 프로세스에 복제된다"는 사실은 뒤에 fork·exec를 다룰 때 다시 만나게 됩니다.</p>
+
+<h2>정리</h2>
+
+<p>이번 차시에 던진 질문과, 답을 얻는 데 쓴 측정값을 한 표로 모으면 다음과 같습니다.</p>
+
+<table>
+<thead>
+<tr><th>질문</th><th>측정값 (표준 API)</th><th>측정값 (Linux /proc · 셸)</th></tr>
+</thead>
+<tbody>
+<tr><td>메모리는 언제 올라오나</td><td><code>getrusage</code>: <code>ru_minflt</code> · <code>ru_majflt</code></td><td>status의 VmRSS · smaps_rollup의 Pss</td></tr>
+<tr><td>CPU를 얼마나 쓰나</td><td><code>getrusage</code>: <code>ru_utime</code> · <code>ru_stime</code></td><td>stat 14·15번 틱 차이 → %CPU</td></tr>
+<tr><td>무엇을 기다리나</td><td><code>getrusage</code>: <code>ru_nvcsw</code> · <code>ru_nivcsw</code></td><td>ps의 wchan · <code>/proc/loadavg</code></td></tr>
+<tr><td>누가 회수하나</td><td><code>waitpid</code>의 종료 상태</td><td>ps STAT의 Z · <code>&lt;defunct&gt;</code> · PPID</td></tr>
+<tr><td>한계를 넘으면</td><td><code>errno</code> (<code>EMFILE</code> · <code>ENOMEM</code>)</td><td><code>$?</code> = 128 + 시그널 · <code>/proc/PID/limits</code></td></tr>
+</tbody>
+</table>
+
+<p>숫자가 예측과 다르면 그 차이가 가장 많은 것을 가르쳐 줍니다.</p>
+
+<ul>
+<li><strong>메모리</strong>: <code>malloc</code>은 예약입니다. 처음 건드린 페이지만큼 폴트와 RSS가 늡니다.</li>
+<li><strong>공유</strong>: RSS는 공유 페이지를 중복해 세고, PSS는 나눠 셉니다.</li>
+<li><strong>CPU</strong>: stat의 utime·stime은 틱이고, 두 표본의 차이가 지금의 %CPU입니다.</li>
+<li><strong>수명</strong>: 자식이 먼저 끝나면 좀비, 부모가 먼저 끝나면 고아가 되어 입양됩니다.</li>
+<li><strong>한계</strong>: 넘으면 <code>errno</code>로 실패하거나 시그널로 끝납니다. 한계는 상속됩니다.</li>
+</ul>
+
+<p>더 읽을 자료는 <code>man 5 proc_pid_stat</code>, <code>man 2 getrusage</code>, <code>man 2 getrlimit</code>입니다. 이어지는 내용은 9주차 시그널, 10주차 fork·exec, 11주차 mmap입니다.</p>
+
+<h3>이것으로 할 수 있는 일</h3>
+
+<ul>
+<li><strong>미니 top 만들기</strong>: <code>/proc/[0-9]*/stat</code>를 모두 읽어 %CPU와 RSS 순으로 정렬하면 나만의 top이 됩니다(pstat의 확장).</li>
+<li><strong>메모리 예산 세우기</strong>: RSS 합 대신 PSS 합으로, 서버 한 대에 프로세스를 몇 개 띄울 수 있는지 계산합니다.</li>
+<li><strong>성능 문제 1차 진단</strong>: user, sys, nvcsw, majflt로 계산, 호출 과다, 대기, 디스크 가운데 어디가 문제인지 가릅니다.</li>
+<li><strong>좀비 감시와 경보</strong>: 주기적으로 Z 수를 세어, 늘어나면 PPID로 부모를 찾아 알립니다.</li>
+<li><strong>서비스 한계 설계</strong>: 동시 연결 수에 맞춰 NOFILE을, 폭주 대비로 CPU와 AS 한계를 시작 스크립트에서 정합니다.</li>
+<li><strong>실험 안전 장치</strong>: 채점기나 샌드박스에서 학생 코드에 CPU, AS, NPROC 한계를 걸어 무한 루프와 fork 폭탄을 막습니다.</li>
+</ul>
+
+<p>측정은 의견을 숫자로 바꾸는 일입니다.</p>
+    </article>
   </main>
 </body>
 </html>

@@ -1,0 +1,293 @@
+<p>2주차 첫 번째 수업은 리눅스 실험환경을 준비하고 기본 명령어를 익히는 시간입니다. 리눅스 시스템이 어떤 층으로 이루어져 있는지부터 시작해 경로와 파일 권한, 패키지 관리, 계정·네트워크 점검을 차례로 다루고, 마지막에는 Hello World 프로그램을 컴파일해 systemd 서비스로 등록하는 데까지 진행합니다.</p>
+
+<h2>1부 · Linux 기본 개념</h2>
+
+<h3>리눅스 시스템의 구성</h3>
+<p>리눅스 시스템은 역할이 다른 여러 층으로 나누어 볼 수 있습니다. 커널, 셸, 배포판이라는 말이 각각 무엇을 가리키는지 구분하는 것이 1부의 목표입니다.</p>
+<ul>
+<li><strong>하드웨어</strong>: CPU, 메모리, 디스크, 네트워크 장치가 실제 연산과 저장을 담당합니다.</li>
+<li><strong>커널</strong>: 프로세스 실행, 메모리, 파일, 장치 접근과 권한을 관리합니다.</li>
+<li><strong>셸과 프로그램</strong>: Bash가 사용자가 입력한 명령을 해석하고 <code>ls</code>나 GCC 같은 프로그램을 실행합니다.</li>
+<li><strong>배포판</strong>: Ubuntu는 Linux 커널에 도구·라이브러리·패키지 관리 체계를 묶어 제공합니다.</li>
+</ul>
+<p>따라서 "버전"도 두 가지를 구별해야 합니다. Ubuntu 22.04는 배포판의 버전이고, <code>uname -r</code>이 출력하는 것은 커널의 버전입니다.</p>
+
+<h3>리눅스 배포판의 주요 계보</h3>
+<p>배포판은 서로 파생 관계로 이어져 있습니다. 대표적인 분기만 간추리면 다음과 같습니다. 시간 순서와 모든 배포판을 담은 것은 아닙니다.</p>
+<ul>
+<li><strong>Debian 계열</strong>: Debian에서 Ubuntu가 나왔습니다. 이 수업은 Ubuntu 22.04와 그 패키지 관리 도구인 APT를 사용합니다. Kali Linux도 이 계열에 속하고, Linux Mint는 Ubuntu를 기반으로 한 것이 주력판입니다(Debian을 직접 기반으로 하는 LMDE도 별도로 있습니다).</li>
+<li><strong>Red Hat 계열</strong>: Red Hat Linux에서 커뮤니티 배포판인 Fedora와 기업용 배포판인 RHEL로 갈라졌습니다. 이것은 역사적 분기를 나타낸 것이며 현재의 개발 흐름 전체를 뜻하지는 않습니다.</li>
+<li><strong>Slackware 계열</strong>: 초기 SUSE는 Slackware의 영향을 받았고 이후 openSUSE로 이어졌습니다. 초기 기반과 역사적 발전을 나타낸 것으로, 현재 두 배포판이 같은 것은 아닙니다.</li>
+<li><strong>Arch 계열</strong>: Arch Linux에서 Manjaro가 파생되었습니다.</li>
+</ul>
+
+<h2>2부 · 시스템 프로그래밍과 파일</h2>
+
+<h3>시스템 프로그래밍의 범위</h3>
+<p>C 코드는 크게 두 종류로 생각할 수 있습니다. 하나는 변수를 계산하고 조건문·반복문을 실행하는 일반적인 C 코드로, 점수의 평균을 계산하는 프로그램이 그 예입니다. 다른 하나는 운영체제의 서비스를 사용하는 C 코드로, 파일을 열고 프로세스를 만들며 시스템 정보를 조회합니다. <code>uname()</code>으로 커널 정보를 조회하는 것이 그 예입니다. 시스템 프로그래밍은 뒤쪽 영역을 다룹니다.</p>
+<p>한 가지 주의할 점은 <code>printf()</code>가 C 라이브러리 함수라는 것입니다. 라이브러리 함수가 항상 시스템 호출과 일대일로 대응하지는 않습니다.</p>
+
+<h3>명령 사용법 확인</h3>
+<p>처음 보는 명령은 외우기보다 사용법을 찾아보는 습관이 먼저입니다. 방법은 두 가지입니다.</p>
+<pre><code>ls --help
+man ls
+# 매뉴얼 화면에서
+# /검색어 : 내용 검색
+# n : 다음 검색 결과
+# q : 매뉴얼 종료</code></pre>
+<p><code>--help</code>는 옵션과 사용 예를 간단히 보여 주는 도움말이고, <code>man</code>은 명령 설명 전체를 담은 상세 매뉴얼입니다. 다만 <code>--help</code>를 지원하는지는 명령마다 다르므로 기본 명령부터 연습합니다. 연습으로 <code>ls -l</code>의 의미를 매뉴얼에서 직접 찾아보십시오.</p>
+
+<h3>터미널에서 명령 읽기</h3>
+<p>터미널의 한 줄은 프롬프트와 명령으로 이루어집니다.</p>
+<pre><code>student@lab:~$ ls -l /etc</code></pre>
+<p>여기서 <code>student</code>는 사용자, <code>lab</code>은 호스트, <code>~</code>는 현재 위치가 홈 디렉토리임을 나타내는 예입니다. 실제로 입력하는 부분은 <code>$</code> 뒤부터이며 <code>$</code> 기호 자체는 입력하지 않습니다. 입력한 내용은 명령 <code>ls</code>, 옵션 <code>-l</code>, 인자 <code>/etc</code>로 나누어 읽습니다. 명령은 대소문자를 구분합니다.</p>
+<pre><code>pwd
+ls -la
+cd ~</code></pre>
+<p>조작할 때는 Tab으로 이름을 완성하고, ↑로 이전 명령을 불러오며, Ctrl+C로 실행 중인 명령을 중단합니다. 이 자료에 실린 출력은 별도 표시가 없으면 설명용 예시이므로 PC마다 달라질 수 있습니다.</p>
+
+<h3>디렉토리 트리와 경로</h3>
+<p>리눅스의 파일은 하나의 트리로 정리되어 있습니다. 맨 위의 <code>/</code>(루트) 아래에 <code>home/</code>, <code>etc/</code>, <code>usr/</code>, <code>var/</code>, <code>tmp/</code> 등이 있고, 예를 들어 <code>home/</code> 아래 <code>student/</code>, 그 아래 <code>week02/</code>, 그 안에 <code>hello.c</code>가 있는 식입니다.</p>
+<ul>
+<li><strong>루트 <code>/</code></strong>: 모든 경로의 출발점, 곧 파일시스템의 시작점입니다. 관리자 계정인 root와는 구별해야 합니다. <code>/root</code>는 root 사용자의 홈 디렉토리입니다.</li>
+<li><strong>절대 경로</strong>: 루트에서부터 적은 경로입니다. 예: <code>/home/student/week02/hello.c</code></li>
+<li><strong>상대 경로</strong>: 현재 위치를 기준으로 적은 경로입니다. 현재 위치가 <code>week02</code>이면 같은 파일을 <code>./hello.c</code>로 가리킬 수 있습니다. <code>..</code>은 상위 디렉토리, <code>.</code>은 현재 디렉토리입니다.</li>
+</ul>
+<pre><code>cd ~/week02
+pwd</code></pre>
+<p><code>~</code>는 셸이 현재 사용자의 홈 디렉토리로 바꾸어(확장해) 주는 표기입니다.</p>
+
+<h3>루트 디렉토리 아래의 주요 경로</h3>
+<p>루트 바로 아래의 디렉토리는 저마다 역할이 정해져 있습니다. 먼저 실행과 설정에 관련된 경로입니다.</p>
+<table>
+<thead><tr><th>경로</th><th>역할</th></tr></thead>
+<tbody>
+<tr><td><code>/bin</code> · <code>/sbin</code></td><td>기본 명령과 관리 명령. Ubuntu에서는 <code>/usr</code> 아래로 연결되어 있을 수 있습니다.</td></tr>
+<tr><td><code>/boot</code> · <code>/lib</code></td><td>부팅 파일과 커널 / 필수 라이브러리와 커널 모듈</td></tr>
+<tr><td><code>/dev</code> · <code>/etc</code></td><td>장치 파일 / 시스템 전체 설정 파일</td></tr>
+<tr><td><code>/home</code> · <code>/root</code></td><td>일반 사용자의 홈 / 관리자 root의 홈</td></tr>
+</tbody>
+</table>
+<p><code>/bin</code>, <code>/sbin</code>, <code>/lib</code>가 실제로 어디에 연결되어 있는지는 <code>ls -ld</code>로 확인합니다. 디렉토리 구성은 배포판에 따라 다를 수 있습니다.</p>
+<p>다음은 데이터와 상태에 관련된 경로입니다.</p>
+<table>
+<thead><tr><th>경로</th><th>역할</th></tr></thead>
+<tbody>
+<tr><td><code>/media</code> · <code>/mnt</code></td><td>이동식 매체의 마운트 위치 / 임시 마운트 위치</td></tr>
+<tr><td><code>/opt</code> · <code>/srv</code></td><td>추가 응용 패키지 / 서비스가 제공하는 데이터</td></tr>
+<tr><td><code>/tmp</code> · <code>/var</code></td><td>임시 파일 / 로그·스풀 등 변하는 데이터</td></tr>
+<tr><td><code>/usr</code> · <code>/proc</code></td><td>프로그램·라이브러리·공유 데이터 / 커널과 프로세스의 가상 정보</td></tr>
+</tbody>
+</table>
+<p><code>/tmp</code>가 언제 정리되는지는 정책에 따라 다릅니다. <code>/proc</code>는 디스크에 저장된 일반적인 디렉토리와는 성격이 다릅니다.</p>
+
+<h3>파일 탐색과 권한의 기초</h3>
+<pre><code>mkdir -p ~/week02
+cd ~/week02
+touch memo.txt
+ls -l memo.txt
+-rw-r--r-- 1 student student 0 ... memo.txt
+cat /etc/os-release
+less /etc/os-release</code></pre>
+<p><code>ls -l</code>이 보여 주는 줄의 맨 앞 <code>-rw-r--r--</code>가 파일 권한입니다. 첫 문자는 파일의 종류이고, 그 뒤의 <code>rwx</code> 표기는 소유자·그룹·기타 사용자 순서로 세 묶음이 이어집니다.</p>
+<p><code>sudo</code>는 허용된 사용자가 지정한 명령을 다른 사용자의 권한으로 실행하게 해 줍니다. 기본 대상은 root입니다. 그렇다고 아무 작업에나 붙이는 것은 아닙니다. 일반 파일을 작성할 때는 <code>sudo</code>를 붙이지 않는 습관을 들입니다. 파일 내용을 넘겨 보는 <code>less</code>는 <code>q</code>로 종료합니다.</p>
+
+<h2>3부 · 패키지 관리와 시스템 점검</h2>
+
+<h3>apt update와 apt upgrade</h3>
+<p>이름이 비슷하지만 두 명령은 하는 일이 다릅니다.</p>
+<ul>
+<li><code>sudo apt update</code>: 저장소에서 패키지 목록과 버전 정보를 받아옵니다. 설치된 프로그램 자체를 새 버전으로 교체하는 단계가 아닙니다.</li>
+<li><code>sudo apt upgrade</code>: 설치된 패키지 가운데 새 버전이 있는 것을 실제로 설치합니다. 필요한 새 의존성은 추가할 수 있지만 기존 패키지를 제거하지는 않습니다.</li>
+</ul>
+<p>이와 달리 <code>apt full-upgrade</code>는 필요하면 패키지를 제거하기도 합니다. 또한 이 명령들은 모두 배포판을 22.04에서 다른 버전으로 바꾸는 작업과는 구별해야 합니다.</p>
+
+<h3>Ubuntu 22.04 패키지 갱신 실습</h3>
+<pre><code>sudo apt update
+apt list --upgradable
+sudo apt upgrade
+# 변경 내용을 먼저 보고 싶다면
+apt -s upgrade
+# 재부팅 요구 파일 확인
+ls /var/run/reboot-required</code></pre>
+<p>순서는 목록을 갱신한 다음 업그레이드 대상을 확인하는 것입니다. <code>apt upgrade</code>가 확인 화면을 보여 주면 다운로드 용량과 설치 변경 내용을 읽고 진행 여부를 선택합니다. <code>-s</code>는 시뮬레이션 옵션으로, 실제 패키지는 바꾸지 않고 어떤 변경이 일어날지만 보여 주므로 미리 확인하고 판단하는 데 씁니다. 자동으로 yes를 답하는 옵션을 기본 명령에 넣지 않은 것도 변경 내역을 읽고 결정하기 위해서입니다.</p>
+<p>완료 후 재부팅 안내가 있으면 작업을 저장한 뒤 실습 담당자의 지시에 따릅니다. <code>/var/run/reboot-required</code> 파일은 없을 수도 있습니다. 이 실습은 실제 Ubuntu에서 <code>sudo</code>로 진행합니다.</p>
+
+<h3>APT 메시지와 대처</h3>
+<ul>
+<li><strong>비밀번호가 보이지 않음</strong>: <code>sudo</code>의 비밀번호를 입력하는 동안 문자가 화면에 표시되지 않는 것은 정상입니다. 입력한 뒤 Enter를 누릅니다.</li>
+<li><strong>Could not get lock</strong>: 다른 업데이트 작업이 진행 중인지 확인하고 기다립니다. 잠금 파일을 지우지 않습니다.</li>
+<li><strong>이름 해석 실패 · 저장소 오류</strong>: 네트워크와 DNS, 저장소 주소를 확인합니다. 오류가 해결된 뒤 <code>update</code>를 다시 실행합니다.</li>
+<li><strong>업그레이드 보류</strong>: 의존성, 보류 설정, 단계적 배포 등이 원인일 수 있습니다. 제거 명령으로 강제로 해결하려 하지 않습니다.</li>
+</ul>
+
+<h3>내 계정과 현재 권한 확인</h3>
+<pre><code>whoami
+id
+# 출력 예시
+student
+uid=1000(student) gid=1000(student) ...
+sudo whoami
+# sudo가 허용되어 있으면 root 출력</code></pre>
+<p><code>whoami</code>는 현재 유효 사용자 ID에 대응하는 사용자 이름을 출력하고, <code>id</code>는 사용자·그룹 ID와 소속 그룹을 보여 줍니다. <code>sudo whoami</code>는 실습 대상 계정에서 권한 계층을 확인하는 방법으로, <code>sudo</code>가 허용되어 있으면 <code>root</code>가 출력됩니다. 예상하지 않은 권한이 보이면 어떤 경로로 로그인했는지와 <code>sudo</code>를 사용했는지부터 확인합니다.</p>
+
+<h3>누가 로그인했는지 확인</h3>
+<pre><code>who
+w
+last -n 10
+# 출력 예시: 로그인 기록 일부
+student pts/0 192.0.2.15 Mon ...</code></pre>
+<p><code>who</code>와 <code>w</code>는 현재 로그인 세션을 보여 주며, <code>w</code>는 각 세션이 수행 중인 작업도 함께 보여 줍니다. <code>last</code>는 최근의 로그인·로그아웃·재부팅 기록을 보여 줍니다. 기록을 볼 때는 본인이 접속하지 않은 시각·계정·출발지가 있는지 확인하고, 원격 세션과 콘솔을 구별합니다.</p>
+<p>기록이 비어 있거나 오래된 기록이 없을 수도 있습니다. 기록이 없다는 것이 안전하다는 증거는 아닙니다.</p>
+
+<h3>ip a 출력 읽기</h3>
+<pre><code>ip a
+ip -br a
+ip route
+# ip a 출력 일부의 예시
+2: enp0s3: &lt;BROADCAST,MULTICAST,UP&gt; ...
+inet 10.0.2.15/24 ...
+inet6 fe80::1234/64 ...</code></pre>
+<ul>
+<li><strong>인터페이스</strong>: <code>lo</code>는 루프백입니다. <code>enp0s3</code> 같은 장치 이름은 환경마다 다릅니다.</li>
+<li><strong>주소</strong>: <code>inet</code>은 IPv4, <code>inet6</code>는 IPv6 주소입니다. <code>/24</code>는 네트워크 접두사 길이입니다.</li>
+<li><strong>해석</strong>: VPN, 가상머신, 컨테이너도 인터페이스를 만듭니다. <code>ip route</code>로 기본 경로를 함께 확인합니다.</li>
+</ul>
+<p><code>ip a</code>가 보여 주는 것은 내 인터페이스의 주소입니다. 나와 접속한 상대방의 목록은 다음에 나오는 <code>ss</code>로 확인합니다.</p>
+
+<h3>열린 포트와 통신 상태 확인</h3>
+<pre><code>sudo ss -lntup
+sudo ss -ntp state established
+# 리스닝 주소 예시
+127.0.0.1:631
+0.0.0.0:22</code></pre>
+<p>옵션의 의미는 <code>l</code>이 수신 대기, <code>n</code>이 숫자 주소, <code>t</code>/<code>u</code>가 TCP/UDP, <code>p</code>가 프로세스 표시입니다. 주소를 읽을 때 <code>127.0.0.1</code>은 로컬 전용이고, <code>0.0.0.0</code>은 모든 IPv4 로컬 주소에 바인딩했다는 뜻입니다. 목록을 볼 때는 자신이 설치한 서비스인지, PID와 프로그램이 예상과 맞는지 확인합니다.</p>
+<p>열린 포트가 있다는 사실만으로 침해라고 단정하지 않습니다. 외부에서 실제로 접근할 수 있는지는 방화벽이나 NAT 등에도 좌우됩니다.</p>
+
+<h3>프로세스와 인증 로그</h3>
+<pre><code>ps -ef
+systemctl --type=service --state=running
+# SSH 서버가 설치된 경우
+sudo journalctl -u ssh --since today
+# auth.log가 존재하는 경우
+sudo tail -n 50 /var/log/auth.log</code></pre>
+<p>프로세스 목록에서는 소유자, PID, 부모 PID, 명령을 관찰합니다. 이름만으로 정상 여부를 판단하지 않습니다. 로그에서는 실패한 인증뿐 아니라 예상하지 않은 성공 로그인도 확인합니다. SSH 서비스가 없거나 로그 설정에 따라 해당 기록이 없을 수도 있습니다. <code>systemctl</code>과 SSH 로그 실습은 실제 Ubuntu PC에서 진행합니다.</p>
+
+<h3>침해 의심 신호의 판단</h3>
+<p>지금까지의 명령으로 본 결과를 어떻게 해석할지가 중요합니다.</p>
+<ul>
+<li><strong>설명 가능한 변화</strong>: VPN을 설치한 뒤 <code>tun0</code>이 생겼거나, 직접 설치한 SSH가 22번 포트를 열고 있는 경우처럼 맥락을 확인하면 설명되는 변화가 있습니다.</li>
+<li><strong>추가 확인이 필요한 변화</strong>: 기억에 없는 로그인과 알 수 없는 프로세스·외부 연결이 함께 나타나는 경우입니다.</li>
+<li><strong>증거 보존과 보고</strong>: 명령 결과, 시각, 호스트를 기록하고 교수자 또는 시스템 관리자에게 알립니다.</li>
+<li><strong>판단의 한계</strong>: 이런 간단한 명령은 초기 점검용입니다. 로그나 명령 자체가 변조된 침해는 놓칠 수 있습니다. 공식적인 사고 판정이나 포렌식 절차를 대신하는 것이 아니며, 감염 확산이 의심되면 관리자의 지시에 따라 네트워크 격리와 증거 보존을 진행합니다.</li>
+</ul>
+<p>결국 평소의 계정·서비스·네트워크 구성을 알고 있어야 새로 생긴 변화의 의미를 판단할 수 있습니다.</p>
+
+<h2>4부 · Hello World 작성과 실행</h2>
+
+<h3>Hello World 작성</h3>
+<p>작업은 <code>labs/class02-01/service</code> 폴더에서 시작하며, <a href="service-helloworld.html">helloworld.c</a>에 다음 코드를 작성합니다. 편집과 컴파일은 일반 사용자로 합니다.</p>
+<pre><code>#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    // 문자열과 줄바꿈 출력
+    printf("Hello, world!\n");
+    return 0; // 정상 종료
+}</code></pre>
+<p><code>return 0</code>은 프로그램이 정상 종료했음을 뜻하는 종료값입니다.</p>
+
+<h3>개발 도구 설치와 경로 확인</h3>
+<pre><code>sudo apt update
+sudo apt install build-essential \
+    vim manpages-dev
+command -v gcc
+command -v make
+gcc --version
+make --version</code></pre>
+<p>Ubuntu에서 이 패키지들을 설치하면 GCC와 make, 편집기와 매뉴얼이 준비됩니다. <code>command -v</code>는 셸이 그 명령을 어느 경로에서 찾는지 보여 주므로 설치 여부를 확인할 수 있고, <code>--version</code>으로 설치된 GCC와 make의 버전을 기록해 둡니다. 기존 수업용 Docker에는 도구가 이미 설치되어 있으므로 경로와 버전만 확인하면 됩니다.</p>
+
+<h3>컴파일과 직접 실행</h3>
+<pre><code>gcc -std=c17 -Wall -Wextra -g \
+    helloworld.c -o helloworld
+./helloworld
+echo $?
+file helloworld
+ls -l helloworld</code></pre>
+<p>GCC가 C 소스로부터 실행 파일 <code>helloworld</code>를 만듭니다. 실행하면 <code>Hello, world!</code>가 한 번 출력되어야 합니다. 이어서 <code>echo $?</code>로 종료값이 0인지, <code>ls -l</code>로 실행 권한이 있는지 확인합니다. 소스를 수정한 뒤에는 다시 컴파일해야 출력이 바뀐다는 점을 기억해 두십시오. 실행되는 것은 소스가 아니라 컴파일된 실행 파일이기 때문입니다.</p>
+
+<h2>5부 · Hello World 서비스 등록</h2>
+
+<h3>서비스 실습 환경</h3>
+<p>서비스란 systemd라는 서비스 관리자가 프로그램의 실행과 상태를 관리해 주는 형태를 말합니다. 그래서 서비스 등록은 PID 1이 systemd인 환경에서만 진행합니다.</p>
+<pre><code>ps -p 1 -o comm=
+# 예상 결과
+systemd
+# 현재 계정 확인
+whoami
+id</code></pre>
+<p>실행 환경으로는 실제 Ubuntu PC 또는 Ubuntu VM을 사용합니다. 기존 수업용 Docker 이미지에서는 편집과 컴파일, 직접 실행까지만 가능합니다.</p>
+
+<h3>Hello World 서비스 설정</h3>
+<p>서비스의 내용은 unit 파일에 적습니다. 제공된 <code>helloworld.service</code>를 그대로 사용합니다.</p>
+<pre><code>[Unit]
+Description=Week02 Hello World
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/helloworld
+DynamicUser=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+<ul>
+<li><code>Type=oneshot</code>: 한 번 실행하고 끝나는 작업에 사용하는 유형입니다. Hello World는 한 줄을 출력하고 종료하므로 여기에 해당합니다.</li>
+<li><code>ExecStart</code>: 설치할 실행 파일의 절대 경로를 적습니다.</li>
+<li><code>DynamicUser=yes</code>: 임시 비특권 계정에서 프로그램을 실행합니다.</li>
+<li><code>StandardOutput</code>/<code>StandardError=journal</code>: 프로그램의 출력을 journal에 기록합니다.</li>
+</ul>
+
+<h3>실행 파일과 서비스 설치</h3>
+<pre><code>sudo install -m 0755 helloworld \
+    /usr/local/bin/helloworld
+sudo install -m 0644 \
+    helloworld.service \
+    /etc/systemd/system/helloworld.service
+sudo systemctl daemon-reload</code></pre>
+<p>실행 파일은 <code>/usr/local/bin</code>에, 서비스 설정은 <code>/etc/systemd/system</code>에 설치합니다. 파일을 설치한 것만으로는 systemd가 새 설정을 알지 못하므로 <code>daemon-reload</code>로 unit 설정을 다시 읽게 합니다. 이 실습은 같은 이름의 기존 서비스가 없는 수업용 Ubuntu에서 진행합니다.</p>
+
+<h3>서비스 실행과 로그 확인</h3>
+<pre><code>u=helloworld.service
+sudo systemctl start "$u"
+systemctl status "$u" --no-pager
+sudo journalctl -u "$u" \
+    -n 20 --no-pager</code></pre>
+<p><code>start</code>가 지금 Hello World를 실행합니다. 서비스로 실행한 프로그램의 출력은 터미널이 아니라 journal에 기록되므로 <code>journalctl</code>로 확인합니다. 로그에서 <code>Hello, world!</code>와 정상 종료 기록이 보이면 성공입니다. <code>u</code>는 셸 변수이므로 이후 명령도 같은 터미널에서 실행해야 값이 유지됩니다.</p>
+
+<h3>oneshot의 정상 종료 상태</h3>
+<pre><code>Type=oneshot
+# RemainAfterExit 설정 없음
+# 작업 성공 후 상태
+inactive (dead)
+# 프로그램 종료 결과 예시
+status=0/SUCCESS</code></pre>
+<p>서비스가 성공했는데도 상태가 <code>inactive (dead)</code>로 나오는 것이 처음에는 실패처럼 보일 수 있습니다. 그러나 이 프로그램은 출력한 뒤 더 실행할 작업이 없어 종료하며, 이 설정에는 <code>RemainAfterExit</code>이 없으므로 작업이 성공한 뒤의 상태가 <code>inactive</code>인 것이 정상입니다. 따라서 <code>inactive</code>라는 표시만으로 실행 실패를 판단하지 않고, 프로그램 종료 결과(<code>status=0/SUCCESS</code>)와 journal 로그를 함께 봅니다. 참고로 inactive 상태에서는 <code>systemctl status</code> 명령 자체의 종료값이 0이 아닐 수 있습니다.</p>
+
+<h3>지금 시작과 부팅 시 실행</h3>
+<pre><code>u=helloworld.service
+sudo systemctl enable "$u"
+systemctl is-enabled "$u"
+sudo systemctl start "$u"
+sudo journalctl -u "$u" \
+    -n 20 --no-pager</code></pre>
+<p>세 명령의 역할을 구분해야 합니다. <code>start</code>는 서비스를 지금 실행하고, <code>enable</code>은 부팅할 때 실행하도록 등록하며, <code>daemon-reload</code>는 변경된 서비스 설정을 다시 읽습니다. <code>enable</code>만 실행하면 현재 시점에 서비스가 시작되지는 않습니다.</p>
+
+<h3>확인 문제</h3>
+<p>이 수업은 Hello World 서비스 등록까지 마무리합니다. 제출할 기록은 GCC 컴파일 명령, 직접 실행 결과와 종료값, <code>systemctl status</code> 결과, journal의 Hello World 출력입니다. 다음 두 질문에 스스로 답할 수 있는지 확인해 보십시오.</p>
+<ul>
+<li>성공한 서비스가 <code>inactive</code>인 이유는 무엇입니까?</li>
+<li><code>start</code>와 <code>enable</code>은 각각 언제 사용합니까?</li>
+</ul>
+<p>다음 수업에서는 반복 실행과 Makefile을 추가하고 서비스 상태와 로그를 확인합니다.</p>

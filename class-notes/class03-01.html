@@ -1,0 +1,351 @@
+<p>이번 시간은 지난 시간의 컴파일·실행 과정을 짧게 복습한 뒤, 저수준 파일 입출력 함수로 작은 프로그램 네 개를 차례로 다룹니다. 빈 파일을 만드는 <a href="file_create.html">file_create</a>, 문자열을 덮어쓰거나 끝에 추가하는 <a href="file_write.html">file_write</a>, 파일을 끝까지 읽어 표준 출력으로 내보내는 <a href="file_read.html">file_read</a>, 지정한 위치의 바이트를 바꾸는 <a href="file_seek.html">file_seek</a>입니다. 네 프로그램을 거치면서 <code>open</code>, <code>close</code>, <code>write</code>, <code>read</code>, <code>lseek</code>가 각각 무엇을 반환하고 어떤 경우에 실패하는지를 익히는 것이 목표입니다.</p>
+
+<h2>섹션 1 · 지난 시간 복습</h2>
+
+<p>복습할 내용은 세 가지입니다. C 소스를 컴파일해 프로그램을 실행하는 것, Makefile로 빌드 과정을 반복하는 것, 그리고 표준 출력을 리다이렉션하고 종료 상태를 확인하는 것입니다.</p>
+
+<h3>컴파일과 Makefile</h3>
+
+<p>먼저 소스 파일과 실행 파일을 구별해야 합니다. <code>helloworld.c</code>는 사람이 읽고 고치는 소스이고, 컴파일 결과로 나온 <code>helloworld</code>가 실제로 실행되는 파일입니다. 따라서 소스를 수정했다면 다시 빌드해야 수정 내용이 실행 파일에 반영됩니다. <code>make</code>는 Makefile에 적힌 규칙을 실행하므로, 같은 컴파일 명령을 매번 손으로 입력하지 않고 빌드 과정을 반복할 수 있습니다.</p>
+
+<pre><code>cc -Wall -Wextra -g helloworld.c -o helloworld
+./helloworld
+make</code></pre>
+
+<p>지난 시간의 Hello World 폴더에서 먼저 실행해 본 다음, 이번 시간에 사용하는 Makefile과 비교해 봅니다.</p>
+
+<h3>표준 출력과 종료 상태</h3>
+
+<p>셸의 <code>&gt;</code>는 대상 파일을 새로 만들거나, 이미 있으면 비운 뒤에 프로그램의 표준 출력을 그 파일에 기록합니다. <code>&gt;&gt;</code>는 기존 내용을 그대로 두고 파일 끝에 추가합니다. 이 두 동작의 차이는 뒤에서 다룰 <code>O_TRUNC</code>와 <code>O_APPEND</code>의 차이와 그대로 이어집니다.</p>
+
+<pre><code>./helloworld &gt; hello.txt
+./helloworld &gt;&gt; hello.txt
+cat hello.txt
+echo $?</code></pre>
+
+<p><code>$?</code>는 직전 명령의 종료 상태입니다. 여기서 주의할 점은 위 예의 <code>echo $?</code>가 보여 주는 값이 <code>helloworld</code>가 아니라 바로 앞에서 실행한 <code>cat</code>의 종료 상태라는 것입니다. Hello World 프로그램의 종료 상태를 보고 싶다면 그 프로그램을 실행한 직후에 <code>echo $?</code>를 실행해야 합니다.</p>
+
+<h2>섹션 2 · 파일 생성</h2>
+
+<p>첫 번째 프로그램 <a href="file_create.html">file_create</a>는 새로운 빈 파일을 만듭니다. 같은 이름의 파일이 이미 존재하면 그 파일을 건드리지 않고 보존한 채 실패합니다. 핵심 함수는 <code>open</code>과 <code>close</code>입니다.</p>
+
+<h3>경로, FD, 열린 파일 상태</h3>
+
+<p>파일을 다룰 때 등장하는 세 가지를 구별해야 합니다.</p>
+
+<ul>
+<li><strong>경로</strong>: <code>open</code>에 전달하는 파일 이름입니다.</li>
+<li><strong>FD(파일 디스크립터)</strong>: 프로세스가 열린 파일을 가리키는 데 사용하는 0 이상의 정수입니다.</li>
+<li><strong>열린 파일 상태</strong>: 현재 오프셋과 상태 flags를 담고 있습니다.</li>
+</ul>
+
+<p>경로는 파일을 여는 순간에만 쓰이고, 그 뒤의 <code>read</code>와 <code>write</code>는 경로 대신 FD를 사용합니다. 한 파일을 두 번 <code>open</code>하면 열린 파일 상태도 따로 두 개가 생기므로, 각각 자기만의 현재 오프셋을 가집니다. <code>dup</code>이나 <code>fork</code>로 열린 파일 상태를 공유하는 경우는 이후 차시에서 설명합니다.</p>
+
+<h3>표준 입력·출력·오류</h3>
+
+<p>프로세스는 시작할 때 이미 세 개의 FD를 가지고 있습니다.</p>
+
+<table>
+<thead>
+<tr><th>FD</th><th>이름</th><th>의미</th></tr>
+</thead>
+<tbody>
+<tr><td>0</td><td><code>STDIN_FILENO</code></td><td>표준 입력</td></tr>
+<tr><td>1</td><td><code>STDOUT_FILENO</code></td><td>표준 출력</td></tr>
+<tr><td>2</td><td><code>STDERR_FILENO</code></td><td>표준 오류</td></tr>
+</tbody>
+</table>
+
+<p>이 셋은 보통 터미널에 연결되어 있지만, 복습에서 본 것처럼 리다이렉션으로 다른 대상에 연결할 수 있습니다. 또 하나 기억할 점은 새로 연 파일의 FD가 반드시 3이라는 보장은 없다는 것입니다. 보통은 3이 나오지만 항상 그런 것은 아니므로, 코드에서 FD 값을 3으로 가정해서는 안 됩니다.</p>
+
+<h3>open과 close</h3>
+
+<p><code>open</code>이 성공하면 FD를 반환합니다. 실패하면 -1을 반환하며, 이때 <code>perror</code>로 실패한 이유를 출력합니다. 성공 여부는 "-1인가 아닌가"로 판단합니다. 0도 유효한 FD이기 때문입니다. <code>close</code>는 성공하면 0, 실패하면 -1을 반환합니다. 사용을 끝낸 FD는 닫습니다.</p>
+
+<pre><code>int fd = open("sample.txt", O_RDONLY);
+if (fd == -1) {
+    perror("open");
+    return 1;
+}
+/* fd를 사용하는 작업 */
+if (close(fd) == -1) {
+    perror("close");
+    return 1;
+}</code></pre>
+
+<h3>생성 권한과 umask</h3>
+
+<p>파일을 새로 만들 때는 <code>open</code>의 세 번째 인자로 권한(mode)을 전달합니다. <code>0666</code>은 <code>rw-rw-rw-</code>, 즉 모두에게 읽기와 쓰기를 허용하는 권한을 <em>요청</em>하는 값입니다. 요청한 값이 그대로 적용되는 것은 아닙니다. 기본 ACL이 없는 디렉터리에서는 <code>mode &amp; ~umask</code>가 적용되어, umask에 켜져 있는 비트가 요청한 권한에서 제거됩니다.</p>
+
+<ul>
+<li>umask가 <code>022</code>이면 결과는 <code>0644</code>입니다.</li>
+<li>umask가 <code>027</code>이면 결과는 <code>0640</code>입니다.</li>
+</ul>
+
+<pre><code>int fd = open("note.txt",
+    O_WRONLY | O_CREAT | O_EXCL,
+    0666);</code></pre>
+
+<p>mode는 파일이 새로 만들어질 때만 의미가 있으며, 이미 존재하는 파일의 권한을 바꾸지는 않습니다. 표기에도 주의해야 합니다. <code>0666</code>의 맨 앞 0은 이 숫자가 8진수임을 나타내므로 빠뜨리면 전혀 다른 값이 됩니다. 또한 <code>O_CREAT</code>를 사용할 때는 mode를 반드시 전달해야 합니다. (심화 내용으로, <code>O_TMPFILE</code>을 사용할 때도 mode가 필요합니다.)</p>
+
+<h3>file_create의 핵심 코드</h3>
+
+<p>file_create는 <code>O_CREAT</code>와 <code>O_EXCL</code>을 함께 사용합니다. <code>O_CREAT</code>만 쓰면 파일이 이미 있을 때 그 파일을 그냥 열게 되지만, <code>O_EXCL</code>을 함께 주면 이미 있는 경우 <code>open</code>이 실패합니다. 이것이 "기존 파일은 보존하고 실패한다"는 동작을 만들어 냅니다. 생성 권한으로는 <code>0666</code>을 요청합니다. 연 뒤에 아무것도 기록하지 않고 닫으므로 크기가 0인 빈 파일이 남습니다.</p>
+
+<pre><code>int fd = open(argv[1],
+    O_WRONLY | O_CREAT | O_EXCL, 0666);
+if (fd == -1) {
+    perror(argv[1]); return 1;
+}
+if (close(fd) == -1) {
+    perror("close"); return 1;
+}</code></pre>
+
+<h3>실습 1 · 빈 파일 만들기</h3>
+
+<p>같은 파일을 두 번 생성해 봅니다. 첫 번째 실행은 파일을 만들고, 두 번째 실행은 파일이 이미 있으므로 종료 상태 1로 실패합니다. 만들어진 파일의 크기와 권한도 함께 확인합니다.</p>
+
+<pre><code>make
+RUN=$(mktemp -d ./run.XXXXXX)
+./file_create "$RUN/note.txt"
+wc -c &lt; "$RUN/note.txt"
+./file_create "$RUN/note.txt"
+echo $?
+ls -l "$RUN/note.txt"</code></pre>
+
+<p><code>mktemp -d</code>로 만든 실습 디렉터리의 경로를 <code>RUN</code>에 담아 두고, 이후의 실습 명령도 같은 셸에서 이 변수를 계속 사용합니다.</p>
+
+<h2>섹션 3 · 파일 쓰기</h2>
+
+<p>두 번째 프로그램 <a href="file_write.html">file_write</a>는 문자열을 파일에 덮어쓰거나 파일 끝에 추가합니다. 핵심 함수는 <code>open</code>, <code>write</code>, <code>close</code>입니다.</p>
+
+<h3>파일의 내용은 바이트의 나열</h3>
+
+<p>텍스트 파일도 결국 바이트로 저장됩니다. 여기서 몇 가지 결과가 따라 나옵니다.</p>
+
+<ul>
+<li>개행도 하나의 바이트로서 저장 공간을 차지합니다.</li>
+<li>C 문자열 끝의 NUL은 파일에 자동으로 저장되지 않습니다. NUL은 메모리 안에서 문자열의 끝을 표시하는 것이지 파일 내용의 일부가 아닙니다.</li>
+<li>한글은 문자 수와 바이트 수가 다를 수 있습니다.</li>
+</ul>
+
+<pre><code>printf 'ABC' &gt; sample.txt
+wc -c &lt; sample.txt
+od -An -tx1 sample.txt</code></pre>
+
+<p><code>wc -c</code>로 바이트 수를, <code>od</code>로 각 바이트의 16진수 값을 직접 확인할 수 있습니다.</p>
+
+<h3>접근 모드와 추가 flags</h3>
+
+<p><code>open</code>의 두 번째 인자에는 먼저 접근 모드를 아래 셋 중 <strong>하나</strong>만 골라 넣습니다.</p>
+
+<ul>
+<li><code>O_RDONLY</code>: 읽기</li>
+<li><code>O_WRONLY</code>: 쓰기</li>
+<li><code>O_RDWR</code>: 읽기와 쓰기</li>
+</ul>
+
+<p>그 밖의 추가 flags는 비트 OR 연산자 <code>|</code>로 접근 모드에 결합합니다. 다만 접근 모드끼리는 결합하지 않습니다. 읽기와 쓰기를 모두 하려면 <code>O_RDWR</code>를 써야 하며, <code>O_RDONLY | O_WRONLY</code>로 표현하지 않습니다. Linux에서 <code>O_RDONLY</code>는 0이므로 이렇게 OR해도 읽기와 쓰기를 합친 의미가 되지 않습니다.</p>
+
+<h3>생성과 기록 방식</h3>
+
+<table>
+<thead>
+<tr><th>flag</th><th>동작</th></tr>
+</thead>
+<tbody>
+<tr><td><code>O_CREAT</code></td><td>파일이 없으면 생성합니다.</td></tr>
+<tr><td><code>O_EXCL</code> + <code>O_CREAT</code></td><td>파일이 이미 있으면 실패합니다.</td></tr>
+<tr><td><code>O_TRUNC</code></td><td>쓰기용으로 연 일반 파일의 길이를 0으로 만듭니다.</td></tr>
+<tr><td><code>O_APPEND</code></td><td>매 <code>write</code>를 파일 끝에 기록합니다.</td></tr>
+</tbody>
+</table>
+
+<p><code>O_TRUNC</code>는 특히 조심해야 합니다. 기존 내용이 없어지는 시점은 <code>write</code>를 호출할 때가 아니라 <code>open</code>이 성공하는 순간입니다. 따라서 쓰기를 한 번도 하지 않더라도 <code>O_TRUNC</code>로 여는 것만으로 데이터가 사라질 수 있습니다.</p>
+
+<h3>write와 부분 쓰기</h3>
+
+<p><code>write</code>의 반환값은 실제로 기록한 바이트 수입니다. 이 값은 요청한 길이보다 작을 수 있습니다. 즉 <code>write</code>를 한 번 호출했다고 해서 요청한 내용이 전부 기록되었다고 가정하면 안 됩니다. 일부만 기록되었다면, 남은 데이터의 위치와 길이를 갱신해 다시 써야 합니다.</p>
+
+<p>이번 시간에는 이 반복을 대신해 주는 보조 함수 <code>write_all</code>이 제공되므로 그것을 사용합니다. 반복문을 직접 구현하는 것은 다음 시간의 주제입니다. <code>write_all</code>은 blocking FD를 전제로 한 함수이며, <code>EINTR</code>로 중단되면 다시 시도하고, 0바이트만 기록된 경우는 <code>EIO</code> 오류로 처리해 무한 반복에 빠지지 않도록 합니다. 덧붙여, <code>write</code>가 성공했다는 것이 데이터가 영구 저장 장치에 저장 완료되었음을 보장하는 것은 아닙니다.</p>
+
+<h3>파일 기록기의 핵심</h3>
+
+<p>아래는 file_write.c의 핵심 부분을 발췌한 것입니다. 발췌에서 <code>path</code>와 <code>text</code>로 적힌 변수는 완성 코드에서 각각 <code>argv[2]</code>와 <code>argv[3]</code>입니다.</p>
+
+<pre><code>int fd = open(path, flags, 0666);
+if (fd == -1) { perror(path); return 1; }
+int status = 0;
+if (write_all(fd, text, strlen(text)) == -1) {
+    perror("write"); status = 1;
+}
+if (close(fd) == -1) {
+    perror("close"); status = 1;
+}
+return status;</code></pre>
+
+<p>이 코드에서 볼 점은 세 가지입니다.</p>
+
+<ul>
+<li><strong>flags가 기록 방식을 결정합니다.</strong> 덮어쓸지 끝에 추가할지는 <code>write</code> 호출이 아니라 <code>open</code>에 넘긴 flags로 정해지며, 쓰는 코드는 두 경우 모두 같습니다.</li>
+<li><strong><code>strlen</code>은 끝의 NUL을 제외합니다.</strong> 그래서 기록할 길이로 <code>strlen(text)</code>를 주면 문자열의 내용만 파일에 들어가고 NUL은 저장되지 않습니다.</li>
+<li><strong>쓰기에 실패한 뒤에도 FD를 닫습니다.</strong> 쓰기 실패 시 바로 <code>return</code>하지 않고 <code>status</code>에 실패를 기록해 둔 뒤 <code>close</code>까지 진행하고, 마지막에 <code>status</code>를 반환합니다.</li>
+</ul>
+
+<p><code>close</code>가 실패했을 때는 오류를 보고할 뿐 다시 닫으려 하지 않습니다. Linux에서는 <code>close</code> 실패를 일괄적으로 재시도하지 않습니다.</p>
+
+<h3>실습 2 · 덮어쓰기와 추가</h3>
+
+<p>file_write의 <code>truncate</code> 모드는 원래 내용을 비운 뒤 기록하고, <code>append</code> 모드는 기존 내용을 유지한 채 끝에 덧붙입니다. 아래 명령을 실행하기 전에 최종 내용과 바이트 수를 먼저 예상해 봅니다.</p>
+
+<pre><code>./file_write truncate "$RUN/note.txt" ABCDEFGHIJ
+./file_write truncate "$RUN/note.txt" XY
+./file_write append "$RUN/note.txt" ZZ
+cat "$RUN/note.txt"; printf '\n'
+wc -c &lt; "$RUN/note.txt"</code></pre>
+
+<p>결과는 <code>XYZZ</code>, 4바이트입니다. 두 번째 명령의 truncate가 처음의 10바이트를 모두 지우고 <code>XY</code>만 남기며, 세 번째 명령이 그 뒤에 <code>ZZ</code>를 추가하기 때문입니다. 소스에서 <code>O_TRUNC</code>를 제거하고 같은 실험을 해 보는 것은 선택 과제입니다.</p>
+
+<h2>섹션 4 · 파일 읽기</h2>
+
+<p>세 번째 프로그램 <a href="file_read.html">file_read</a>는 파일을 읽어 그 내용을 표준 출력에 기록합니다. 핵심 함수는 <code>open</code>, <code>read</code>, <code>write</code>, <code>close</code>입니다.</p>
+
+<h3>read의 반환값</h3>
+
+<pre><code>unsigned char buf[16];
+ssize_t n = read(fd, buf, sizeof buf);</code></pre>
+
+<p><code>read</code>의 반환값 <code>n</code>은 세 경우로 나누어 해석합니다.</p>
+
+<ul>
+<li><code>n &gt; 0</code>: 실제로 읽은 바이트 수입니다.</li>
+<li><code>n == 0</code>: 일반 파일의 EOF, 즉 더 읽을 내용이 없다는 뜻입니다.</li>
+<li><code>n == -1</code>: 오류입니다.</li>
+</ul>
+
+<p>요청한 크기보다 적게 읽혔더라도 그것만으로 파일이 끝났다고 판단하지 않고 다음 <code>read</code>를 계속합니다. 끝을 알려 주는 것은 반환값 0뿐입니다. 이 해석은 일반 파일을 읽고 요청한 길이(count)가 0보다 큰, 이번 수업의 상황을 전제로 합니다. 길이 0을 요청해서 돌아온 0은 EOF로 해석하지 않습니다.</p>
+
+<h3>읽은 바이트만 사용하기</h3>
+
+<p><code>read</code>는 읽어 온 데이터 끝에 NUL을 붙여 주지 않습니다. 버퍼에 들어 있는 것은 문자열이 아니라 바이트들이므로, 버퍼의 크기와 실제로 읽은 길이를 구별해서 정확히 <code>n</code>바이트만 사용해야 합니다.</p>
+
+<pre><code>/* n &gt; 0인 경우 */
+write_all(STDOUT_FILENO, buf, (size_t)n);
+
+/* 피해야 할 가정 */
+printf("%s", buf);
+/* NUL 종료가 보장되지 않는다. */</code></pre>
+
+<p><code>printf("%s", buf)</code>는 NUL을 만날 때까지 출력하는데, 버퍼에 NUL 종료가 보장되지 않으므로 써서는 안 되는 방식입니다. 길이를 명시해 쓰는 방식은 바이너리 파일에도 똑같이 적용됩니다. 위 발췌는 <code>write_all</code>의 반환값을 검사하지 않고 있는데, 검사는 바로 아래의 반복문과 완성 소스에서 수행합니다.</p>
+
+<h3>EOF까지 반복 읽기</h3>
+
+<pre><code>for (;;) {
+    ssize_t n = read(fd, buf, sizeof buf);
+    if (n == 0) break;
+    if (n == -1) {
+        if (errno == EINTR) continue;
+        perror("read"); status = 1; break;
+    }
+    if (write_all(1, buf, (size_t)n) == -1) {
+        perror("write"); status = 1; break;
+    }
+}</code></pre>
+
+<p>이 반복문에서 오류와 EOF는 서로 다른 종료 경로입니다. EOF(<code>n == 0</code>)는 정상적으로 다 읽었다는 뜻이므로 <code>status</code>를 바꾸지 않고 빠져나오고, 오류(<code>n == -1</code>)는 메시지를 출력하고 <code>status</code>를 1로 만든 뒤 빠져나옵니다. 다만 오류 중에서 <code>EINTR</code>는 읽는 도중 신호로 중단된 경우를 뜻하며, 완성 소스는 이때 실패로 처리하지 않고 다시 읽습니다. 읽기에 성공한 경우에는 읽은 <code>n</code>바이트를 표준 출력(FD 1)에 쓰고, 이 쓰기가 실패해도 역시 실패로 기록하고 반복을 끝냅니다.</p>
+
+<h3>실습 3 · 버퍼와 EOF</h3>
+
+<p>16바이트 버퍼로 32바이트짜리 파일을 읽습니다. 한 번의 <code>read</code>로는 다 읽을 수 없으므로 반복이 실제로 일어납니다. 복사한 결과가 원본과 같은지 <code>cmp</code>로 확인하고, 빈 파일과 없는 파일을 읽을 때의 종료 상태도 비교합니다.</p>
+
+<pre><code>printf '0123456789abcdefghijklmnopqrstuv' &gt; "$RUN/long.txt"
+./file_read "$RUN/long.txt" &gt; "$RUN/copy.txt"
+cmp "$RUN/long.txt" "$RUN/copy.txt"
+./file_create "$RUN/empty.txt"
+./file_read "$RUN/empty.txt"; echo $?
+./file_read "$RUN/missing.txt"; echo $?</code></pre>
+
+<p>빈 파일과 없는 파일은 서로 다른 경우입니다. 빈 파일은 <code>open</code>에 성공하고 첫 <code>read</code>가 곧바로 0을 반환하는 정상 상황이고, 없는 파일은 <code>open</code> 자체가 실패합니다. 이어서 버퍼 크기를 7바이트로 바꿔 다시 빌드하고 결과가 어떻게 달라지는지 관찰합니다.</p>
+
+<h2>섹션 5 · 지정 위치 수정</h2>
+
+<p>네 번째 프로그램 <a href="file_seek.html">file_seek</a>는 지정한 위치의 내용을 읽고, 그 위치의 일부 바이트를 바꿉니다. 핵심 함수는 <code>lseek</code>, <code>read</code>, <code>write</code>입니다. 이 프로그램이 하는 일은 문자열 삽입이 아니라 기존 바이트를 덮어쓰는 것이라는 점을 먼저 분명히 해 둡니다.</p>
+
+<h3>lseek와 세 가지 기준</h3>
+
+<p><code>lseek</code>는 열린 파일의 현재 오프셋을 옮깁니다. 어디를 기준으로 옮길지는 세 번째 인자로 정합니다.</p>
+
+<ul>
+<li><code>SEEK_SET</code>: 파일 시작 기준</li>
+<li><code>SEEK_CUR</code>: 현재 위치 기준</li>
+<li><code>SEEK_END</code>: 파일 끝 기준</li>
+</ul>
+
+<pre><code>off_t pos = lseek(fd, 3, SEEK_SET);
+if (pos == (off_t)-1) {
+    perror("lseek");
+}</code></pre>
+
+<p>성공하면 새 위치를 반환하고, 실패하면 <code>(off_t)-1</code>을 반환합니다. 위치의 단위는 바이트이며 첫 위치는 0입니다. 따라서 위 예는 파일의 네 번째 바이트로 이동합니다.</p>
+
+<h3>오프셋 3에 XY를 쓰면</h3>
+
+<pre><code>변경 전: ABCDEFGHIJ
+위치:     0123456789
+변경 후: ABCXYFGHIJ</code></pre>
+
+<p>오프셋 3에는 <code>D</code>가, 4에는 <code>E</code>가 있으므로 <code>XY</code>를 쓰면 이 두 바이트가 바뀝니다. 뒤의 내용이 밀려나지 않으므로 파일 크기는 그대로 10바이트입니다. 한글은 한 글자가 여러 바이트일 수 있어 바이트 위치와 글자 위치가 어긋나므로, 이 실습은 ASCII 문자로 진행합니다.</p>
+
+<h3>읽은 뒤에는 위치가 이동한다</h3>
+
+<p>file_seek는 수정하기 전에 해당 위치의 내용을 먼저 읽어서 보여 줍니다. 그런데 위치 3에서 읽으면 읽은 만큼 오프셋이 앞으로 전진합니다. 이 상태에서 바로 쓰면 원래 의도한 위치가 아니라 읽기가 끝난 지점에 기록됩니다. 그래서 수정하기 전에 다시 위치 3으로 이동해야 합니다.</p>
+
+<pre><code>lseek(fd, offset, SEEK_SET);
+n = read(fd, buf, sizeof buf);
+
+/* 원래 수정할 위치로 복귀 */
+lseek(fd, offset, SEEK_SET);
+write_all(fd, text, strlen(text));</code></pre>
+
+<p>위 코드는 흐름만 보여 주는 발췌이며, 완성 코드에서는 <code>lseek</code>, <code>read</code>, <code>write_all</code>의 반환값을 모두 검사합니다. 파일을 여는 방식에도 이유가 있습니다. 같은 FD로 읽기와 쓰기를 모두 해야 하므로 <code>O_RDWR</code>로 엽니다. <code>O_TRUNC</code>는 기존 내용을 지워 버리므로 사용하지 않고, <code>O_APPEND</code>도 사용하지 않습니다. <code>O_APPEND</code>로 열면 <code>lseek</code>로 위치를 옮긴 뒤에도 <code>write</code>는 파일 끝에 기록하기 때문에 지정 위치 수정이 되지 않습니다.</p>
+
+<h3>실습 4 · 지정 위치 수정</h3>
+
+<p>file_seek는 수정 전의 일부 내용을 표준 출력에 표시합니다. 수정한 뒤에는 file_read로 파일 전체를 다시 읽어 결과를 확인합니다.</p>
+
+<pre><code>./file_write truncate "$RUN/note.txt" ABCDEFGHIJ
+./file_seek "$RUN/note.txt" 3 XY
+printf '\n'
+./file_read "$RUN/note.txt"; printf '\n'
+wc -c &lt; "$RUN/note.txt"</code></pre>
+
+<p>수정 전 출력은 오프셋 3부터의 내용인 <code>DEFGHIJ</code>이고, 수정 후 파일 내용은 <code>ABCXYFGHIJ</code>입니다. 명령의 TEXT 인자에는 개행이나 NUL이 자동으로 추가되지 않으므로, 정확히 주어진 글자만 기록됩니다. 이어서 오프셋 0과 파일 끝 위치에 대해서도 같은 실험을 해 봅니다.</p>
+
+<h3>위치 이동과 파일 크기</h3>
+
+<p>위치 이동과 파일 크기의 관계는 다음과 같이 정리됩니다.</p>
+
+<ul>
+<li><code>lseek</code>만으로는 파일 크기가 늘어나지 않습니다. 오프셋을 옮기는 것일 뿐 파일 내용을 바꾸지 않기 때문입니다.</li>
+<li>파일 끝 위치에서 쓰면 쓴 만큼 길이가 늘어납니다.</li>
+<li>파일 끝을 넘어선 위치에서 쓰면, 원래의 끝과 새로 쓴 위치 사이의 영역은 읽을 때 0으로 읽힙니다.</li>
+<li>파이프처럼 위치 이동이 불가능한 대상도 있습니다.</li>
+</ul>
+
+<p>선택 실습으로, 10바이트 파일의 오프셋 12에 <code>Z</code>를 기록해 봅니다. 파일 크기는 13이 되고, <code>od</code>로 보면 사이의 두 바이트가 <code>00 00</code>임을 확인할 수 있습니다. 또한 file_seek는 오프셋 인자로 음수나 잘못된 숫자가 들어오면 거부합니다.</p>
+
+<h2>확인 퀴즈</h2>
+
+<p>아래 답은 일반 파일을 읽고 요청 길이가 0보다 큰 상황을 전제로 합니다.</p>
+
+<ol>
+<li><strong><code>open</code>의 실패 반환값은?</strong> -1입니다.</li>
+<li><strong>빈 파일과 없는 파일은 어떻게 구별하는가?</strong> 빈 파일은 <code>open</code>에 성공하고 <code>read</code>가 0을 반환하며, 없는 파일은 <code>open</code>이 실패합니다.</li>
+<li><strong><code>O_TRUNC</code>와 <code>O_APPEND</code>의 차이는?</strong> <code>O_TRUNC</code>는 파일 길이를 0으로 초기화하고, <code>O_APPEND</code>는 파일 끝에 씁니다.</li>
+<li><strong><code>lseek(fd, 0, SEEK_CUR)</code>는 무엇을 반환하는가?</strong> 현재 오프셋을 반환하며, 실패하면 -1입니다.</li>
+<li><strong><code>read</code> 후 같은 위치에 쓰려면 무엇이 필요한가?</strong> 다시 <code>lseek</code>로 그 위치로 이동해야 합니다.</li>
+</ol>
+
+<h2>제출과 다음 시간</h2>
+
+<p>제출물은 C 프로그램 4개와 <code>REPORT.md</code>입니다. 보고서에는 생성, 쓰기, 읽기, 지정 위치 수정의 실행 결과를 기록합니다. 수정 과제는 버퍼 크기를 바꾸는 것과 위치 이동 기준을 바꾸는 것입니다. 다음 시간에는 이번에 <code>write_all</code>에 맡겨 두었던 부분 쓰기 반복문을 직접 구현하고, 파일 복사기를 만듭니다.</p>

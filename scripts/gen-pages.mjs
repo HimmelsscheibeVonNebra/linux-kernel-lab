@@ -2,7 +2,8 @@
 //
 //   index.html                          hub: kernel lab + every class
 //   kernel.html                         kernel module lab (root shell)
-//   examples/<class>/index.html         one class, list of its examples
+//   examples/<class>/index.html         one class: its examples + lecture notes
+//                                       (class-notes/<class>.html, if present)
 //   examples/<class>/<example>.html     one example: terminal + steps + source
 //
 //   node scripts/gen-pages.mjs
@@ -99,6 +100,59 @@ function localHeaders(classId, source) {
   return out;
 }
 
+// ---------------------------------------------------------------- lecture notes
+
+// class-notes/<class>.html is an HTML fragment (the class's slides written
+// out as prose) inlined into the class index page.  Because it is inlined
+// as-is, check it: allowed tags only, properly nested, links resolve.
+const NOTE_TAGS = new Set(
+  "h2 h3 p ul ol li pre code table thead tbody tr th td strong em a blockquote br".split(" ")
+);
+
+function loadNotes(cls) {
+  const rel = `class-notes/${cls.class}.html`;
+  if (!fs.existsSync(path.join(ROOT, rel))) return "";
+  const html = read(rel).trim();
+  const slugs = new Set(cls.examples.map(slugOf));
+  const problems = [];
+  const stack = [];
+
+  for (const m of html.matchAll(/<(\/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*)>/g)) {
+    const [, close, rawTag, attrs] = m;
+    const tag = rawTag.toLowerCase();
+    if (!NOTE_TAGS.has(tag)) {
+      problems.push(`tag <${tag}> not allowed`);
+      continue;
+    }
+    if (tag === "br") continue;
+    if (close) {
+      const open = stack.pop();
+      if (open !== tag) problems.push(`</${tag}> closes <${open ?? "nothing"}>`);
+      continue;
+    }
+    stack.push(tag);
+    const attrText = attrs.trim();
+    if (tag === "a") {
+      const href = attrText.match(/^href="([^"]*)"$/);
+      if (!href) problems.push(`<a> must have only href: ${attrText}`);
+      else if (!/^https?:\/\//.test(href[1]) && !slugs.has(href[1].replace(/\.html$/, "")))
+        problems.push(`link to unknown example page: ${href[1]}`);
+    } else if (attrText) {
+      problems.push(`<${tag}> has attributes: ${attrText}`);
+    }
+  }
+  if (stack.length) problems.push(`unclosed: ${stack.join(", ")}`);
+  // A bare "<" or "&" would swallow or garble the text after it.
+  const text = html.replace(/<\/?[a-zA-Z][^>]*>/g, "");
+  if (/</.test(text)) problems.push('unescaped "<" in text');
+  if (/&(?!(amp|lt|gt|quot|#\d+|#x[0-9a-fA-F]+);)/.test(text)) problems.push('unescaped "&" in text');
+
+  if (problems.length) {
+    throw new Error(`${rel}:\n  ${[...new Set(problems)].slice(0, 12).join("\n  ")}`);
+  }
+  return html;
+}
+
 // ---------------------------------------------------------------- examples
 
 const classes = fs
@@ -109,9 +163,12 @@ const classes = fs
   .filter((c) => c.examples.length > 0);
 
 let pageCount = 0;
+let notesCount = 0;
 
 for (const cls of classes) {
   const label = classLabel(cls.class);
+  const notes = loadNotes(cls);
+  if (notes) notesCount++;
 
   // class index
   write(
@@ -125,14 +182,17 @@ for (const cls of classes) {
     <p>${esc(cls.summary)}</p>
   </header>
   <main class="list">
-    <ul class="cards">
+    <section>
+      <h2>실행해 볼 예제</h2>
+      <ul class="cards">
 ${cls.examples
   .map(
-    (ex) => `      <li><a href="${slugOf(ex)}.html"><strong>${esc(ex.name)}</strong><span>${esc(ex.summary)}</span></a></li>`
+    (ex) => `        <li><a href="${slugOf(ex)}.html"><strong>${esc(ex.name)}</strong><span>${esc(ex.summary)}</span></a></li>`
   )
   .join("\n")}
-    </ul>
-  </main>`,
+      </ul>
+    </section>
+${notes ? `    <article class="notes">\n${notes}\n    </article>\n` : ""}  </main>`,
     })
   );
 
@@ -306,4 +366,6 @@ ${cls.examples.map((ex) => `        <li><a href="examples/${cls.class}/${slugOf(
   })
 );
 
-console.log(`generated ${pageCount} example pages in ${classes.length} classes, plus index.html and kernel.html`);
+console.log(
+  `generated ${pageCount} example pages in ${classes.length} classes (${notesCount} with lecture notes), plus index.html and kernel.html`
+);

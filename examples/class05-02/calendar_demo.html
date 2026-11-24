@@ -33,11 +33,11 @@
           <p>epoch, local, utc가 나오고 약 1.2초 뒤 difftime(1.0 또는 2.0)이 출력됩니다.</p>
         </li>
         <li>
-          <div class="cmd"><button type="button" data-cmd="TZ=KST-9 ./calendar_demo" title="터미널에서 실행" aria-label="실행: TZ=KST-9 ./calendar_demo">▶</button><code>TZ=KST-9 ./calendar_demo</code></div>
+          <div class="cmd"><button type="button" data-cmd="TZ=Asia/Seoul ./calendar_demo" title="터미널에서 실행" aria-label="실행: TZ=Asia/Seoul ./calendar_demo">▶</button><code>TZ=Asia/Seoul ./calendar_demo</code></div>
           <p>local이 utc보다 정확히 9시간 앞서는지 확인합니다.</p>
         </li>
         <li>
-          <div class="cmd"><button type="button" data-cmd="TZ=UTC0 ./calendar_demo" title="터미널에서 실행" aria-label="실행: TZ=UTC0 ./calendar_demo">▶</button><code>TZ=UTC0 ./calendar_demo</code></div>
+          <div class="cmd"><button type="button" data-cmd="TZ=UTC ./calendar_demo" title="터미널에서 실행" aria-label="실행: TZ=UTC ./calendar_demo">▶</button><code>TZ=UTC ./calendar_demo</code></div>
           <p>TZ를 UTC로 바꾸면 local과 utc의 시각이 같아집니다. epoch는 TZ와 무관합니다.</p>
         </li>
         <li>
@@ -45,7 +45,7 @@
           <p>epoch 값과 date 명령의 결과를 교차 확인합니다.</p>
         </li>
       </ol>
-      <p class="callout">각 실행은 1.2초 동안 바쁜 대기를 합니다. 게스트에 zoneinfo 파일이 없을 수 있어 README의 TZ=Asia/Seoul 대신 POSIX 형식(KST-9, UTC0)을 사용했습니다. 32비트라 time_t와 long이 4바이트이며, 대기 루프의 나노초 계산은 경과가 2초 미만일 때만 long 범위에 들어갑니다(VM이 오래 멈추면 대기가 몇 초 길어질 수 있음).</p>
+      <p class="callout">각 실행은 1.2초 동안 바쁜 대기를 합니다. 32비트라 time_t와 long이 4바이트이며, 대기 루프의 나노초 계산은 경과가 2초 미만일 때만 long 범위에 들어갑니다(VM이 오래 멈추면 대기가 몇 초 길어질 수 있음).</p>
     </aside>
   </main>
   <section class="sources">
