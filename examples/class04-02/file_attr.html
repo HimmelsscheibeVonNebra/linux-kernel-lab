@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>file_attr — 파일 속성 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class04-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">4주차 2차시</a><span class="sep">/</span><span>file_attr</span></nav>
+  <header>
+    <h1>file_attr</h1>
+    <p>기본은 lstat, --follow를 주면 stat으로 종류, inode, 링크 수, 권한(rwx 문자열), 소유자, 크기·블록 수, 나노초 단위 atime/mtime/ctime을 출력합니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class04-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="rm -rf attr_lab &amp;&amp; mkdir attr_lab &amp;&amp; printf 'ABC\n' &gt; attr_lab/note.txt &amp;&amp; ln attr_lab/note.txt attr_lab/hard.txt &amp;&amp; ln -s note.txt attr_lab/soft.txt" title="터미널에서 실행" aria-label="실행: rm -rf attr_lab &amp;&amp; mkdir attr_lab &amp;&amp; printf 'ABC\n' &gt; attr_lab/note.txt &amp;&amp; ln attr_lab/note.txt attr_lab/hard.txt &amp;&amp; ln -s note.txt attr_lab/soft.txt">▶</button><code>rm -rf attr_lab &amp;&amp; mkdir attr_lab &amp;&amp; printf 'ABC\n' &gt; attr_lab/note.txt &amp;&amp; ln attr_lab/note.txt attr_lab/hard.txt &amp;&amp; ln -s note.txt attr_lab/soft.txt</code></div>
+          <p>4바이트 파일과 하드 링크, 심볼릭 링크를 준비합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./file_attr attr_lab/note.txt" title="터미널에서 실행" aria-label="실행: ./file_attr attr_lab/note.txt">▶</button><code>./file_attr attr_lab/note.txt</code></div>
+          <p>type=regular, links=2, size=4와 rwx 문자열, 세 가지 시각을 확인합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./file_attr attr_lab/soft.txt" title="터미널에서 실행" aria-label="실행: ./file_attr attr_lab/soft.txt">▶</button><code>./file_attr attr_lab/soft.txt</code></div>
+          <p>lstat 결과입니다. type=symlink, size는 'note.txt'의 길이 8입니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./file_attr --follow attr_lab/soft.txt" title="터미널에서 실행" aria-label="실행: ./file_attr --follow attr_lab/soft.txt">▶</button><code>./file_attr --follow attr_lab/soft.txt</code></div>
+          <p>stat은 링크를 따라가므로 대상의 type=regular, size=4와 같은 inode가 나옵니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="ln -s missing attr_lab/broken.txt &amp;&amp; ./file_attr attr_lab/broken.txt &amp;&amp; ./file_attr --follow attr_lab/broken.txt; echo &quot;status=$?&quot;" title="터미널에서 실행" aria-label="실행: ln -s missing attr_lab/broken.txt &amp;&amp; ./file_attr attr_lab/broken.txt &amp;&amp; ./file_attr --follow attr_lab/broken.txt; echo &quot;status=$?&quot;">▶</button><code>ln -s missing attr_lab/broken.txt &amp;&amp; ./file_attr attr_lab/broken.txt &amp;&amp; ./file_attr --follow attr_lab/broken.txt; echo &quot;status=$?&quot;</code></div>
+          <p>깨진 링크도 링크 자체의 속성은 읽히지만 --follow 조회는 ENOENT로 실패합니다(상태 1).</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="chmod 000 attr_lab/note.txt; ./file_attr attr_lab/note.txt; cat attr_lab/note.txt; chmod 600 attr_lab/note.txt" title="터미널에서 실행" aria-label="실행: chmod 000 attr_lab/note.txt; ./file_attr attr_lab/note.txt; cat attr_lab/note.txt; chmod 600 attr_lab/note.txt">▶</button><code>chmod 000 attr_lab/note.txt; ./file_attr attr_lab/note.txt; cat attr_lab/note.txt; chmod 600 attr_lab/note.txt</code></div>
+          <p>권한이 0000이어도 속성 조회는 됩니다. 내용 읽기(cat)만 Permission denied로 실패합니다.</p>
+        </li>
+      </ol>
+      <p class="callout">root가 아닌 student(uid 1000)로 실행하므로 mode 000 파일의 cat이 실제로 거부됩니다. _FILE_OFFSET_BITS=64로 빌드되어 크기는 64비트이지만 time_t는 32비트입니다. tmpfs라 blocks 값은 디스크 파일시스템과 다를 수 있습니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>file_attr.c <span class="muted">62줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;inttypes.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;sys/stat.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">static const char *kind(mode_t m)</span>
+<span class="ln">{</span>
+<span class="ln">    if (S_ISREG(m)) return &quot;regular&quot;;</span>
+<span class="ln">    if (S_ISDIR(m)) return &quot;directory&quot;;</span>
+<span class="ln">    if (S_ISLNK(m)) return &quot;symlink&quot;;</span>
+<span class="ln">    if (S_ISCHR(m)) return &quot;char-device&quot;;</span>
+<span class="ln">    if (S_ISBLK(m)) return &quot;block-device&quot;;</span>
+<span class="ln">    if (S_ISFIFO(m)) return &quot;fifo&quot;;</span>
+<span class="ln">    if (S_ISSOCK(m)) return &quot;socket&quot;;</span>
+<span class="ln">    return &quot;unknown&quot;;</span>
+<span class="ln">}</span>
+<span class="ln">static void permissions(mode_t mode, char out[10])</span>
+<span class="ln">{</span>
+<span class="ln">    const mode_t bits[9] = {</span>
+<span class="ln">        S_IRUSR, S_IWUSR, S_IXUSR, S_IRGRP, S_IWGRP, S_IXGRP,</span>
+<span class="ln">        S_IROTH, S_IWOTH, S_IXOTH</span>
+<span class="ln">    };</span>
+<span class="ln">    for (int i = 0; i &lt; 9; ++i)</span>
+<span class="ln">        out[i] = (mode &amp; bits[i]) ? &quot;rwx&quot;[i % 3] : '-';</span>
+<span class="ln">    if (mode &amp; S_ISUID) out[2] = (mode &amp; S_IXUSR) ? 's' : 'S';</span>
+<span class="ln">    if (mode &amp; S_ISGID) out[5] = (mode &amp; S_IXGRP) ? 's' : 'S';</span>
+<span class="ln">    if (mode &amp; S_ISVTX) out[8] = (mode &amp; S_IXOTH) ? 't' : 'T';</span>
+<span class="ln">    out[9] = '\0';</span>
+<span class="ln">}</span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    int follow = argc == 3 &amp;&amp; strcmp(argv[1], &quot;--follow&quot;) == 0;</span>
+<span class="ln">    if (!(argc == 2 || follow)) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s [--follow] PATH\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    const char *path = argv[follow ? 2 : 1];</span>
+<span class="ln">    struct stat st;</span>
+<span class="ln">    if ((follow ? stat(path, &amp;st) : lstat(path, &amp;st)) == -1) {</span>
+<span class="ln">        perror(path); return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    char mode_text[10];</span>
+<span class="ln">    permissions(st.st_mode, mode_text);</span>
+<span class="ln">    printf(&quot;type=%s\n&quot;, kind(st.st_mode));</span>
+<span class="ln">    printf(&quot;device=%ju inode=%ju links=%ju\n&quot;, (uintmax_t)st.st_dev,</span>
+<span class="ln">           (uintmax_t)st.st_ino, (uintmax_t)st.st_nlink);</span>
+<span class="ln">    printf(&quot;mode=%04jo rwx=%s uid=%ju gid=%ju\n&quot;,</span>
+<span class="ln">           (uintmax_t)(st.st_mode &amp; 07777), mode_text,</span>
+<span class="ln">           (uintmax_t)st.st_uid, (uintmax_t)st.st_gid);</span>
+<span class="ln">    printf(&quot;size=%jd blocks=%jd blksize=%jd\n&quot;, (intmax_t)st.st_size,</span>
+<span class="ln">           (intmax_t)st.st_blocks, (intmax_t)st.st_blksize);</span>
+<span class="ln">#ifdef __APPLE__</span>
+<span class="ln">    struct timespec at = st.st_atimespec, mt = st.st_mtimespec, ct = st.st_ctimespec;</span>
+<span class="ln">#else</span>
+<span class="ln">    struct timespec at = st.st_atim, mt = st.st_mtim, ct = st.st_ctim;</span>
+<span class="ln">#endif</span>
+<span class="ln">    printf(&quot;atime=%jd.%09ld\n&quot;, (intmax_t)at.tv_sec, at.tv_nsec);</span>
+<span class="ln">    printf(&quot;mtime=%jd.%09ld\n&quot;, (intmax_t)mt.tv_sec, mt.tv_nsec);</span>
+<span class="ln">    printf(&quot;ctime=%jd.%09ld\n&quot;, (intmax_t)ct.tv_sec, ct.tv_nsec);</span>
+<span class="ln">    if (fflush(stdout) == EOF) { perror(&quot;stdout&quot;); return 1; }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <span></span>
+    <a href="mode_demo.html">mode_demo →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

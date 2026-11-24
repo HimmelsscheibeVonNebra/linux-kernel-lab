@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>usr_round — 시그널 심화: 블록·보류·sigsuspend·안전한 핸들러 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class09-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">9주차 2차시</a><span class="sep">/</span><span>usr_round</span></nav>
+  <header>
+    <h1>usr_round</h1>
+    <p>부모가 kill로 자식에게 SIGUSR1을 보내면 자식 핸들러가 SIGUSR2로 회신하는 왕복을 R번 반복해, PID로 대상을 지정하는 프로세스 간 시그널 통신을 보여 준다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class09-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./usr_round 2" title="터미널에서 실행" aria-label="실행: ./usr_round 2">▶</button><code>./usr_round 2</code></div>
+          <p>[child handler] → [parent handler] → round n/2 done 순서로 두 번 왕복</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./usr_round" title="터미널에서 실행" aria-label="실행: ./usr_round">▶</button><code>./usr_round</code></div>
+          <p>기본 4회 왕복 뒤 자식 exited, status=0</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./usr_round 11; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./usr_round 11; echo &quot;exit=$?&quot;">▶</button><code>./usr_round 11; echo &quot;exit=$?&quot;</code></div>
+          <p>범위 밖(1-10)은 usage, 종료 상태 2</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>usr_round.c <span class="muted">147줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;signal.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;sys/wait.h&gt;</span>
+<span class="ln">#include &lt;time.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* 두 프로세스가 SIGUSR1·SIGUSR2로 왕복합니다. 부모가 fork한 자식에게</span>
+<span class="ln">   kill(child, SIGUSR1)을 보내면, 자식의 핸들러가 kill(getppid(),</span>
+<span class="ln">   SIGUSR2)로 회신합니다. 이런 왕복을 R번(기본 4) 한 뒤 각자 세어 본</span>
+<span class="ln">   수를 보고하고 정상 종료합니다. kill()은 PID로 대상을 고르므로</span>
+<span class="ln">   같은 시그널이라도 누구에게 가는지가 중요합니다.</span>
+<span class="ln">   표준 시그널은 큐잉되지 않습니다: 보류 중에 같은 번호가 다시</span>
+<span class="ln">   도착하면 하나로 합쳐집니다(개수·순서 보장이 없습니다). 여기서는</span>
+<span class="ln">   한 번씩 주고받아 충돌을 만들지 않습니다. 부모는 회신을 짧은</span>
+<span class="ln">   폴링으로 기다립니다. 검사 뒤 pause()로 기다리면 회신이 그 사이에</span>
+<span class="ln">   도착해 놓치는 경쟁이 생기는데, 경쟁 없는 대기는 이 폴더의</span>
+<span class="ln">   suspend_demo가 다루는 sigsuspend로 없앱니다. */</span>
+<span class="ln"> </span>
+<span class="ln">static volatile sig_atomic_t got = 0;</span>
+<span class="ln"> </span>
+<span class="ln">static void on_usr1(int sig)            /* 자식: 회신한다 */</span>
+<span class="ln">{</span>
+<span class="ln">    static const char msg[] = &quot;  [child handler] USR1 -&gt; replying USR2\n&quot;;</span>
+<span class="ln">    (void)sig;</span>
+<span class="ln">    ssize_t r = write(STDOUT_FILENO, msg, sizeof msg - 1);</span>
+<span class="ln">    (void)r;</span>
+<span class="ln">    got++;</span>
+<span class="ln">    pid_t pp = getppid();               /* 시스템 호출이라 안전하다 */</span>
+<span class="ln">    kill(pp, SIGUSR2);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void on_usr2(int sig)            /* 부모: 받기만 한다 */</span>
+<span class="ln">{</span>
+<span class="ln">    static const char msg[] = &quot;  [parent handler] USR2 received\n&quot;;</span>
+<span class="ln">    (void)sig;</span>
+<span class="ln">    ssize_t r = write(STDOUT_FILENO, msg, sizeof msg - 1);</span>
+<span class="ln">    (void)r;</span>
+<span class="ln">    got++;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int set_handler(int sig, void (*handler)(int))</span>
+<span class="ln">{</span>
+<span class="ln">    struct sigaction sa;</span>
+<span class="ln">    memset(&amp;sa, 0, sizeof sa);</span>
+<span class="ln">    sa.sa_handler = handler;</span>
+<span class="ln">    sigemptyset(&amp;sa.sa_mask);</span>
+<span class="ln">    return sigaction(sig, &amp;sa, NULL);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static double now(void)</span>
+<span class="ln">{</span>
+<span class="ln">    struct timespec ts;</span>
+<span class="ln">    clock_gettime(CLOCK_MONOTONIC, &amp;ts);</span>
+<span class="ln">    return ts.tv_sec + ts.tv_nsec / 1e9;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    long rounds = 4;</span>
+<span class="ln">    if (argc == 2) {</span>
+<span class="ln">        char *end = NULL;</span>
+<span class="ln">        rounds = strtol(argv[1], &amp;end, 10);</span>
+<span class="ln">        if (end == argv[1] || *end != '\0' || rounds &lt; 1 || rounds &gt; 10)</span>
+<span class="ln">            rounds = -1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (argc &gt; 2 || rounds == -1) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s [rounds 1-10]\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    int sync[2];</span>
+<span class="ln">    if (pipe(sync) == -1) {</span>
+<span class="ln">        perror(&quot;pipe&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    pid_t child = fork();</span>
+<span class="ln">    if (child == -1) {</span>
+<span class="ln">        perror(&quot;fork&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (child == 0) {</span>
+<span class="ln">        close(sync[0]);</span>
+<span class="ln">        if (set_handler(SIGUSR1, on_usr1) == -1) {</span>
+<span class="ln">            perror(&quot;sigaction&quot;);</span>
+<span class="ln">            _exit(1);</span>
+<span class="ln">        }</span>
+<span class="ln">        alarm(10);              /* 안전망: 영원히 매달리지 않는다 */</span>
+<span class="ln">        printf(&quot;child=%ld ready for %ld rounds\n&quot;, (long)getpid(), rounds);</span>
+<span class="ln">        fflush(stdout);</span>
+<span class="ln">        char b = 'r';</span>
+<span class="ln">        ssize_t w = write(sync[1], &amp;b, 1);      /* 핸들러 설치를 알린다 */</span>
+<span class="ln">        (void)w;</span>
+<span class="ln">        close(sync[1]);</span>
+<span class="ln">        while (got &lt; rounds)</span>
+<span class="ln">            pause();            /* USR1 핸들러가 끝나면 돌아온다 */</span>
+<span class="ln">        printf(&quot;child=%ld done: received %d USR1, replied %d USR2\n&quot;,</span>
+<span class="ln">               (long)getpid(), (int)got, (int)got);</span>
+<span class="ln">        fflush(stdout);</span>
+<span class="ln">        _exit(0);</span>
+<span class="ln">    }</span>
+<span class="ln">    close(sync[1]);</span>
+<span class="ln">    if (set_handler(SIGUSR2, on_usr2) == -1) {</span>
+<span class="ln">        perror(&quot;sigaction&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    char b;</span>
+<span class="ln">    if (read(sync[0], &amp;b, 1) != 1) {    /* 자식이 준비될 때까지 동기화 */</span>
+<span class="ln">        perror(&quot;read&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    close(sync[0]);</span>
+<span class="ln">    printf(&quot;parent=%ld child=%ld rounds=%ld\n&quot;,</span>
+<span class="ln">           (long)getpid(), (long)child, rounds);</span>
+<span class="ln">    fflush(stdout);</span>
+<span class="ln">    for (long r = 1; r &lt;= rounds; r++) {</span>
+<span class="ln">        got = 0;</span>
+<span class="ln">        kill(child, SIGUSR1);</span>
+<span class="ln">        double t0 = now();</span>
+<span class="ln">        while (got == 0) {      /* 짧은 폴링: 검사-대기 경쟁을 피한다 */</span>
+<span class="ln">            struct timespec spin = {0, 10 * 1000 * 1000};</span>
+<span class="ln">            nanosleep(&amp;spin, NULL);</span>
+<span class="ln">            if (now() - t0 &gt; 5.0) {</span>
+<span class="ln">                fprintf(stderr, &quot;parent: no reply in 5s (round %ld)\n&quot;, r);</span>
+<span class="ln">                kill(child, SIGKILL);</span>
+<span class="ln">                waitpid(child, NULL, 0);</span>
+<span class="ln">                return 1;</span>
+<span class="ln">            }</span>
+<span class="ln">        }</span>
+<span class="ln">        printf(&quot;round %ld/%ld done (parent got %d USR2)\n&quot;, r, rounds, got);</span>
+<span class="ln">        fflush(stdout);</span>
+<span class="ln">    }</span>
+<span class="ln">    int status;</span>
+<span class="ln">    if (waitpid(child, &amp;status, 0) == -1) {</span>
+<span class="ln">        perror(&quot;waitpid&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (WIFEXITED(status))</span>
+<span class="ln">        printf(&quot;child=%ld exited, status=%d\n&quot;,</span>
+<span class="ln">               (long)child, WEXITSTATUS(status));</span>
+<span class="ln">    else</span>
+<span class="ln">        printf(&quot;child=%ld killed by signal %d\n&quot;,</span>
+<span class="ln">               (long)child, WTERMSIG(status));</span>
+<span class="ln">    printf(&quot;parent done: received %ld rounds of USR2\n&quot;, rounds);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="chld_reap.html">← chld_reap</a>
+    <span></span>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

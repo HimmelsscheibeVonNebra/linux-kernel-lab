@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>3주차 2차시 견고한 I/O와 파일 복사 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body data-root="../../">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><span>3주차 2차시</span></nav>
+  <header>
+    <h1>견고한 I/O와 파일 복사</h1>
+    <p>read의 반환 길이를 관찰하고, 부분 쓰기와 EINTR를 처리하는 write_all을 검증한 뒤 이를 이용한 파일 복사 프로그램을 실행한다.</p>
+  </header>
+  <main class="list">
+    <ul class="cards">
+      <li><a href="file_copy.html"><strong>file_copy</strong><span>4096바이트 버퍼로 read한 만큼 write_all로 새 파일에 기록해 복사한다. 목적지는 O_CREAT | O_EXCL로 열기 때문에 기존 파일을 덮어쓰지 않는다.</span></a></li>
+      <li><a href="read_chunks.html"><strong>read_chunks</strong><span>4바이트 버퍼로 read를 반복하며 반환값을 stderr에, 읽은 데이터를 stdout에 내보낸다. 짧은 read와 EOF(0)를 구별해 본다.</span></a></li>
+      <li><a href="test_write_all.html"><strong>test_write_all</strong><span>write를 가짜 함수로 바꿔 부분 쓰기, EINTR, 0 반환, ENOSPC, EAGAIN 등을 재현하고 io_helpers.h의 write_all 완성본을 assert로 검사한다.</span></a></li>
+    </ul>
+  </main>
+</body>
+</html>

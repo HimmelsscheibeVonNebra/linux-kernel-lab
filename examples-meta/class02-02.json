@@ -1,0 +1,34 @@
+{
+  "class": "class02-02",
+  "title": "while 반복 서비스와 Makefile",
+  "summary": "while(1)·printf·fflush·sleep으로 2초마다 출력하는 반복 프로그램을 실행하고, 백그라운드 실행과 kill로 프로세스를 관찰·종료한다.",
+  "examples": [
+    {
+      "name": "helloworld",
+      "source": "helloworld.c",
+      "summary": "while (1) 안에서 Hello, world!를 출력하고 fflush한 뒤 sleep(2)로 쉬는 무한 반복 프로그램이다. 스스로 끝나지 않으므로 신호로 종료한다.",
+      "steps": [
+        { "cmd": "./helloworld & sleep 5; kill $!; wait $!; echo \"exit=$?\"", "note": "5초 동안 2초 간격으로 세 번 출력된다. kill(SIGTERM)로 끝냈으므로 종료 상태는 143(128+15)이다." },
+        { "cmd": "./helloworld > hello.log & sleep 3; ps | grep '[h]elloworld'; kill $!", "note": "백그라운드로 실행 중인 프로세스의 PID를 ps로 확인한 뒤 종료한다." },
+        { "cmd": "cat hello.log", "note": "fflush 덕분에 파일로 보낸 출력도 바로 기록되어 두 줄이 남아 있다." },
+        { "cmd": "ps | grep '[h]elloworld'; echo \"남은 프로세스 확인: grep 종료 상태=$?\"", "note": "아무 줄도 나오지 않고 상태가 1이면 프로세스가 남아 있지 않은 것이다." }
+      ],
+      "manual": false,
+      "expect": "Hello, world!",
+      "notes": "직접 ./helloworld만 실행하면 Ctrl+C를 누를 때까지 끝나지 않는다. 이 VM에는 make, gcc, systemd, sudo가 없어 README의 Makefile 빌드와 서비스 등록·journalctl 단계는 실행할 수 없다."
+    },
+    {
+      "name": "helloworld",
+      "source": "gdb/helloworld.c",
+      "summary": "count를 1씩 증가시키며 2초마다 count=N을 출력하는 GDB 연습용 반복 프로그램이다. 여기서는 실행 결과와 시스템 콜만 관찰한다.",
+      "steps": [
+        { "cmd": "./gdb/helloworld & sleep 5; kill $!; wait $!; echo \"exit=$?\"", "note": "count=1, 2, 3이 2초 간격으로 출력된 뒤 SIGTERM으로 종료된다(상태 143)." },
+        { "cmd": "strace -f -e trace=write timeout 5 ./gdb/helloworld", "note": "반복마다 write(1, \"count=N\\n\", ...)가 한 번씩 호출되는 것을 본다. timeout이 5초 뒤 SIGTERM을 보내 종료시킨다." },
+        { "cmd": "ps | grep '[h]elloworld'; echo \"남은 프로세스 확인: grep 종료 상태=$?\"", "note": "상태가 1이면 남은 프로세스가 없는 것이다." }
+      ],
+      "manual": false,
+      "expect": "count=3",
+      "notes": "이 VM에는 gdb가 없어 README의 break/next/print 실습은 할 수 없다. 대신 strace로 반복 동작을 관찰한다."
+    }
+  ]
+}

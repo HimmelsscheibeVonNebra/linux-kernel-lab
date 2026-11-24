@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sig_names — 시그널: 종료 상태·처리·관찰 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class09-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">9주차 1차시</a><span class="sep">/</span><span>sig_names</span></nav>
+  <header>
+    <h1>sig_names</h1>
+    <p>시그널 번호 1~31의 이름, strsignal 설명, 기본 동작(Term·Core·Stop·Cont·Ignore)을 표로 보여 주는 참조 도구다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class09-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./sig_names | head -16" title="터미널에서 실행" aria-label="실행: ./sig_names | head -16">▶</button><code>./sig_names | head -16</code></div>
+          <p>1~16번: 이름·설명·기본 동작</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./sig_names | tail -16" title="터미널에서 실행" aria-label="실행: ./sig_names | tail -16">▶</button><code>./sig_names | tail -16</code></div>
+          <p>17~31번과 RT 범위 안내</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./sig_names 9; ./sig_names 11; ./sig_names 17; ./sig_names 19" title="터미널에서 실행" aria-label="실행: ./sig_names 9; ./sig_names 11; ./sig_names 17; ./sig_names 19">▶</button><code>./sig_names 9; ./sig_names 11; ./sig_names 17; ./sig_names 19</code></div>
+          <p>KILL=Term, SEGV=Core, CHLD=Ignore, STOP=Stop</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="kill -l" title="터미널에서 실행" aria-label="실행: kill -l">▶</button><code>kill -l</code></div>
+          <p>셸의 시그널 목록과 번호 대조</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./sig_names 32; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./sig_names 32; echo &quot;exit=$?&quot;">▶</button><code>./sig_names 32; echo &quot;exit=$?&quot;</code></div>
+          <p>범위 밖 번호는 usage, 종료 상태 2</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>sig_names.c <span class="muted">64줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* 시그널 번호와 이름의 대응을 보여 주는 참조 도구입니다.</span>
+<span class="ln">   인자가 없으면 1-31을 표로, 인자 N이면 그 번호의 이름·설명·</span>
+<span class="ln">   기본 동작을 출력합니다. 이름과 기본 동작 표는 x86-64 리눅스</span>
+<span class="ln">   번호 기준이고 환경마다 다를 수 있으므로 kill -l과 strsignal 열,</span>
+<span class="ln">   signal(7) 매뉴얼과 서로 대조해 보세요(같은 번호가 환경마다</span>
+<span class="ln">   다른 시그널을 가리킬 수 있습니다). */</span>
+<span class="ln"> </span>
+<span class="ln">static const char *names[32] = {</span>
+<span class="ln">    &quot;?&quot;, &quot;HUP&quot;, &quot;INT&quot;, &quot;QUIT&quot;, &quot;ILL&quot;, &quot;TRAP&quot;, &quot;ABRT&quot;, &quot;BUS&quot;, &quot;FPE&quot;,</span>
+<span class="ln">    &quot;KILL&quot;, &quot;USR1&quot;, &quot;SEGV&quot;, &quot;USR2&quot;, &quot;PIPE&quot;, &quot;ALRM&quot;, &quot;TERM&quot;, &quot;STKFLT&quot;,</span>
+<span class="ln">    &quot;CHLD&quot;, &quot;CONT&quot;, &quot;STOP&quot;, &quot;TSTP&quot;, &quot;TTIN&quot;, &quot;TTOU&quot;, &quot;URG&quot;, &quot;XCPU&quot;,</span>
+<span class="ln">    &quot;XFSZ&quot;, &quot;VTALRM&quot;, &quot;PROF&quot;, &quot;WINCH&quot;, &quot;IO&quot;, &quot;PWR&quot;, &quot;SYS&quot;};</span>
+<span class="ln"> </span>
+<span class="ln">/* 기본 동작: T=Term(종료), C=Core(종료+코어 덤프), S=Stop(정지),</span>
+<span class="ln">   c=Cont(재개), I=Ignore(무시). 리눅스 signal(7)의 표를 옮겼습니다. */</span>
+<span class="ln">static const char acts[32] = {</span>
+<span class="ln">    '?', 'T', 'T', 'C', 'C', 'C', 'C', 'C',</span>
+<span class="ln">    'C', 'T', 'T', 'C', 'T', 'T', 'T', 'T',</span>
+<span class="ln">    'T', 'I', 'c', 'S', 'S', 'S', 'S', 'I',</span>
+<span class="ln">    'C', 'C', 'T', 'T', 'I', 'T', 'T', 'C'};</span>
+<span class="ln"> </span>
+<span class="ln">static const char *act_name(char c)</span>
+<span class="ln">{</span>
+<span class="ln">    switch (c) {</span>
+<span class="ln">    case 'T': return &quot;Term&quot;;</span>
+<span class="ln">    case 'C': return &quot;Core&quot;;</span>
+<span class="ln">    case 'S': return &quot;Stop&quot;;</span>
+<span class="ln">    case 'c': return &quot;Cont&quot;;</span>
+<span class="ln">    case 'I': return &quot;Ignore&quot;;</span>
+<span class="ln">    }</span>
+<span class="ln">    return &quot;?&quot;;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void print_row(int sig)</span>
+<span class="ln">{</span>
+<span class="ln">    printf(&quot;%2d) %-6s %-30s default=%s\n&quot;, sig, names[sig],</span>
+<span class="ln">           strsignal(sig), act_name(acts[sig]));</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc &gt; 2) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s [signal 1-31]\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (argc == 2) {</span>
+<span class="ln">        char *end = NULL;</span>
+<span class="ln">        long sig = strtol(argv[1], &amp;end, 10);</span>
+<span class="ln">        if (end == argv[1] || *end != '\0' || sig &lt; 1 || sig &gt; 31) {</span>
+<span class="ln">            fprintf(stderr, &quot;usage: %s [signal 1-31]\n&quot;, argv[0]);</span>
+<span class="ln">            return 2;</span>
+<span class="ln">        }</span>
+<span class="ln">        print_row((int)sig);</span>
+<span class="ln">        return 0;</span>
+<span class="ln">    }</span>
+<span class="ln">    for (int sig = 1; sig &lt;= 31; sig++)</span>
+<span class="ln">        print_row(sig);</span>
+<span class="ln">    printf(&quot;32-64: RT(real-time) 범위입니다. 이 과목 범위에서는 다루지 않습니다.\n&quot;);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="sigmask_show.html">← sigmask_show</a>
+    <span></span>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

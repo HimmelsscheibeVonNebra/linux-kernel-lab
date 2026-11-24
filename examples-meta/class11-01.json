@@ -1,0 +1,67 @@
+{
+  "class": "class11-01",
+  "title": "메모리 매핑 (mmap)",
+  "summary": "mmap으로 익명·파일 매핑을 만들고, MAP_PRIVATE와 MAP_SHARED의 차이, fork 뒤의 공유와 경쟁 상태, read와 mmap의 page fault 차이를 확인하는 예제입니다.",
+  "examples": [
+    {
+      "name": "mmap_basic",
+      "source": "mmap_basic.c",
+      "summary": "파일 없이 정수 하나 크기의 익명 매핑(MAP_PRIVATE | MAP_ANONYMOUS)을 만들고 42를 쓰고 읽은 뒤 munmap으로 해제하는 입문 예제입니다.",
+      "steps": [
+        { "cmd": "./mmap_basic", "note": "*p = 42 가 출력된다. mmap이 돌려준 주소를 일반 포인터처럼 쓴다." },
+        { "cmd": "strace -e trace=mmap,mmap2,munmap ./mmap_basic 2>&1 | tail -5", "note": "마지막 쪽에서 길이 4의 MAP_PRIVATE|MAP_ANONYMOUS 매핑과 munmap 호출을 찾는다. 그 앞의 mmap2는 동적 로더가 라이브러리를 올리는 호출이다." }
+      ],
+      "manual": false,
+      "expect": "*p = 42",
+      "notes": "32비트(i686)에서는 mmap()이 mmap2 시스템 콜로 나갑니다. 4바이트를 요청해도 실제 매핑은 페이지(4096바이트) 단위입니다."
+    },
+    {
+      "name": "mapcat",
+      "source": "mapcat.c",
+      "summary": "파일을 open · fstat한 뒤 mmap(PROT_READ, MAP_PRIVATE)으로 매핑해 read 없이 write로 표준 출력에 내보냅니다. -p 옵션은 매핑을 유지한 채 기다려 /proc/PID/maps를 관찰하게 합니다.",
+      "steps": [
+        { "cmd": "printf 'hello mmap\\nsecond line\\n' > hello.txt", "note": "매핑할 23바이트짜리 파일을 만든다." },
+        { "cmd": "./mapcat hello.txt", "note": "파일 내용이 그대로 출력된다 (cat과 같은 결과)." },
+        { "cmd": ": > empty.txt; ./mapcat empty.txt; echo \"exit=$?\"", "note": "길이 0은 매핑할 수 없으므로 empty file 안내만 하고 종료 코드 0으로 끝난다." },
+        { "cmd": "./mapcat .; echo \"exit=$?\"", "note": "디렉터리는 not a regular file로 거절한다 (종료 코드 1)." },
+        { "cmd": "sleep 3 | ./mapcat -p hello.txt > /dev/null & sleep 1; grep hello.txt /proc/$!/maps; wait", "note": "-p로 대기하는 동안 /proc/PID/maps에서 hello.txt가 r--p(읽기 전용, private)로 매핑된 줄을 본다. fd는 이미 닫혔지만 매핑은 남아 있다. 3초 뒤 표준 입력이 EOF가 되면 munmap하고 끝난다." },
+        { "cmd": "rm -f hello.txt empty.txt", "note": "실습 파일을 지운다." }
+      ],
+      "manual": false,
+      "expect": "mapped 23 bytes",
+      "notes": "터미널이 하나뿐이라 -p의 Enter 대기를 sleep 3 파이프의 EOF로 대신했습니다. 직접 해 보려면 ./mapcat -p hello.txt 를 실행하고 Enter를 누르면 됩니다."
+    },
+    {
+      "name": "mapmode",
+      "source": "mapmode.c",
+      "summary": "매핑 플래그에 따라 수정이 어디까지 보이는지 확인합니다. private/shared는 첫 줄을 대문자로 바꾼 뒤 pread로 파일을 다시 읽고, anon은 fork 뒤 전역 변수와 익명 공유 매핑을 비교하며, race는 여러 자식이 공유 카운터를 잠금 없이 올립니다.",
+      "steps": [
+        { "cmd": "printf 'hello mmap\\nsecond line\\n' > p.txt; cp p.txt s.txt", "note": "같은 내용의 파일 두 개를 준비한다." },
+        { "cmd": "./mapmode private p.txt; cat p.txt", "note": "MAP_PRIVATE: 매핑에서는 HELLO MMAP이지만 파일(pread, cat)은 소문자 그대로다 (copy-on-write)." },
+        { "cmd": "./mapmode shared s.txt; cat s.txt", "note": "MAP_SHARED: 매핑을 고친 것이 파일에도 반영되어 첫 줄이 HELLO MMAP으로 바뀐다." },
+        { "cmd": "./mapmode anon", "note": "자식이 고친 전역 변수는 부모에게 0으로 남고, 익명 공유 매핑의 값만 42로 보인다." },
+        { "cmd": "./mapmode race 4 5000000", "note": "자식 4개가 공유 카운터를 500만 번씩 올린다. expected와 actual을 비교하고 lost가 0이 아닌지 본다." },
+        { "cmd": "rm -f p.txt s.txt", "note": "실습 파일을 지운다." }
+      ],
+      "manual": false,
+      "expect": "parent: global=0 shared=42",
+      "notes": "이 VM은 CPU가 1개라서 경쟁은 타이머 인터럽트로 프로세스가 '읽기-더하기-쓰기' 중간에 교체될 때만 생깁니다. 그래서 반복 횟수를 교안(100만)보다 큰 500만으로 잡았습니다. 그래도 lost 0이 나올 수 있으니 몇 번 반복하거나 횟수를 늘려 보세요."
+    },
+    {
+      "name": "countnl",
+      "source": "countnl.c",
+      "summary": "같은 파일의 개행 수를 read(64 KiB 버퍼)와 mmap으로 세고, 경과 시간과 minor/major page fault 수(getrusage)를 출력합니다. drop은 posix_fadvise(DONTNEED)로 그 파일의 페이지 캐시를 비워 달라고 요청합니다.",
+      "steps": [
+        { "cmd": "seq 1 1000000 > lines.txt; ls -l lines.txt", "note": "100만 줄(약 6.9 MB)짜리 파일을 만든다." },
+        { "cmd": "./countnl read lines.txt", "note": "read 방식: lines=1000000, minflt는 거의 0이다 (커널이 버퍼로 복사해 준다)." },
+        { "cmd": "./countnl mmap lines.txt", "note": "mmap 방식: 같은 줄 수가 나오지만 페이지를 처음 만질 때마다 fault가 나서 minflt가 read보다 훨씬 많다." },
+        { "cmd": "./countnl mmap lines.txt seq", "note": "madvise(MADV_SEQUENTIAL) 힌트를 준 경우의 시간과 fault 수를 비교한다." },
+        { "cmd": "./countnl drop lines.txt; ./countnl read lines.txt", "note": "drop 뒤 다시 읽는다. 이 VM에서는 majflt가 여전히 0이다 (notes 참고)." },
+        { "cmd": "rm -f lines.txt", "note": "실습 파일을 지운다 (tmpfs라서 파일이 곧 메모리다)." }
+      ],
+      "manual": false,
+      "expect": "lines=1000000",
+      "notes": "루트 파일시스템이 tmpfs(RAM)라서 파일 데이터가 곧 페이지 캐시입니다. posix_fadvise(DONTNEED)는 성공(0)을 돌려주지만 실제로 비워지지 않으므로 cold/warm 차이와 major fault는 관찰되지 않습니다. 또 RAM이 256 MB이므로 README의 247 MB 파일(seq 1 30000000) 실험은 할 수 없어 크기를 줄였습니다."
+    }
+  ]
+}

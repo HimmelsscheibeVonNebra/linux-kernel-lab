@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>reap_show — 프로세스 심화: 측정하고 실험하기 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class07-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">7주차 2차시</a><span class="sep">/</span><span>reap_show</span></nav>
+  <header>
+    <h1>reap_show</h1>
+    <p>fork한 자식이 먼저 끝났는데 부모가 waitpid를 미루면 좀비(Z)가 되고, 부모가 먼저 끝나면 고아가 되어 새 부모에게 입양되는 과정을 보여 준다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class07-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./reap_show zombie 3 &amp; sleep 1; grep -s State /proc/[0-9]*/status | grep Z; wait" title="터미널에서 실행" aria-label="실행: ./reap_show zombie 3 &amp; sleep 1; grep -s State /proc/[0-9]*/status | grep Z; wait">▶</button><code>./reap_show zombie 3 &amp; sleep 1; grep -s State /proc/[0-9]*/status | grep Z; wait</code></div>
+          <p>회수 전 자식이 State: Z (zombie)로 보이고, 3초 뒤 reaped … exit_status=7</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="grep -s State /proc/[0-9]*/status | grep -c Z" title="터미널에서 실행" aria-label="실행: grep -s State /proc/[0-9]*/status | grep -c Z">▶</button><code>grep -s State /proc/[0-9]*/status | grep -c Z</code></div>
+          <p>회수 뒤에는 좀비 항목이 사라진다(0)</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./reap_show orphan; sleep 3" title="터미널에서 실행" aria-label="실행: ./reap_show orphan; sleep 3">▶</button><code>./reap_show orphan; sleep 3</code></div>
+          <p>부모가 먼저 종료: ppid_before(부모 PID) → ppid_after(보통 1, init)</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./reap_show; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./reap_show; echo &quot;exit=$?&quot;">▶</button><code>./reap_show; echo &quot;exit=$?&quot;</code></div>
+          <p>인자가 없으면 usage, 종료 상태 2</p>
+        </li>
+      </ol>
+      <p class="callout">BusyBox ps는 -p 옵션이 없어 프로그램이 안내하는 ps 명령 대신 /proc/PID/status의 State로 확인한다. orphan 모드에서는 프롬프트가 돌아온 뒤 자식의 두 번째 줄이 출력된다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>reap_show.c <span class="muted">92줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;sys/wait.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* 종료와 회수 사이의 상태를 일부러 늘려 관찰한다.</span>
+<span class="ln">   zombie: 자식은 곧바로 종료 상태 7로 끝나고, 부모는 [seconds]초</span>
+<span class="ln">           동안 회수하지 않는다. 그동안 ps에 Z &lt;defunct&gt;가 보인다.</span>
+<span class="ln">           그 뒤 waitpid로 회수하면 항목이 사라진다.</span>
+<span class="ln">   orphan: 부모가 먼저 끝나고, 자식은 2초 뒤 자기 PPID를 다시 본다.</span>
+<span class="ln">           새 부모는 PID 1이거나 가장 가까운 subreaper다.</span>
+<span class="ln">   fork·waitpid의 정식 계약은 10주차에서 다룬다. 여기서는 관찰 도구다. */</span>
+<span class="ln"> </span>
+<span class="ln">static int flush_or_die(void)</span>
+<span class="ln">{</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return -1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int zombie(long seconds)</span>
+<span class="ln">{</span>
+<span class="ln">    pid_t child = fork();</span>
+<span class="ln">    if (child == -1) {</span>
+<span class="ln">        perror(&quot;fork&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (child == 0)</span>
+<span class="ln">        _exit(7);               /* 자식: 즉시 종료 상태 7 */</span>
+<span class="ln">    printf(&quot;parent=%ld child=%ld (child exited, not reaped yet)\n&quot;,</span>
+<span class="ln">           (long)getpid(), (long)child);</span>
+<span class="ln">    printf(&quot;observe: ps -o pid,ppid,stat,command -p %ld\n&quot;, (long)child);</span>
+<span class="ln">    if (flush_or_die() == -1)</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    unsigned int left = (unsigned int)seconds;</span>
+<span class="ln">    while (left != 0)</span>
+<span class="ln">        left = sleep(left);</span>
+<span class="ln">    int status;</span>
+<span class="ln">    if (waitpid(child, &amp;status, 0) == -1) {</span>
+<span class="ln">        perror(&quot;waitpid&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (WIFEXITED(status))</span>
+<span class="ln">        printf(&quot;reaped child=%ld exit_status=%d\n&quot;,</span>
+<span class="ln">               (long)child, WEXITSTATUS(status));</span>
+<span class="ln">    return flush_or_die() == -1 ? 1 : 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int orphan(void)</span>
+<span class="ln">{</span>
+<span class="ln">    if (flush_or_die() == -1)</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    pid_t child = fork();</span>
+<span class="ln">    if (child == -1) {</span>
+<span class="ln">        perror(&quot;fork&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (child &gt; 0) {</span>
+<span class="ln">        printf(&quot;parent=%ld exits now, child=%ld\n&quot;,</span>
+<span class="ln">               (long)getpid(), (long)child);</span>
+<span class="ln">        return flush_or_die() == -1 ? 1 : 0;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;child=%ld ppid_before=%ld\n&quot;, (long)getpid(), (long)getppid());</span>
+<span class="ln">    if (flush_or_die() == -1)</span>
+<span class="ln">        _exit(1);</span>
+<span class="ln">    sleep(2);</span>
+<span class="ln">    printf(&quot;child=%ld ppid_after=%ld (adopted)\n&quot;,</span>
+<span class="ln">           (long)getpid(), (long)getppid());</span>
+<span class="ln">    _exit(flush_or_die() == -1 ? 1 : 0);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc &gt;= 2 &amp;&amp; argc &lt;= 3 &amp;&amp; strcmp(argv[1], &quot;zombie&quot;) == 0) {</span>
+<span class="ln">        long seconds = 10;</span>
+<span class="ln">        if (argc == 3) {</span>
+<span class="ln">            char *end = NULL;</span>
+<span class="ln">            seconds = strtol(argv[2], &amp;end, 10);</span>
+<span class="ln">            if (end == argv[2] || *end != '\0' || seconds &lt; 0 || seconds &gt; 600)</span>
+<span class="ln">                seconds = -1;</span>
+<span class="ln">        }</span>
+<span class="ln">        if (seconds &gt;= 0)</span>
+<span class="ln">            return zombie(seconds);</span>
+<span class="ln">    } else if (argc == 2 &amp;&amp; strcmp(argv[1], &quot;orphan&quot;) == 0) {</span>
+<span class="ln">        return orphan();</span>
+<span class="ln">    }</span>
+<span class="ln">    fprintf(stderr, &quot;usage: %s zombie [seconds 0-600] | orphan\n&quot;, argv[0]);</span>
+<span class="ln">    return 2;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="cpu_wait.html">← cpu_wait</a>
+    <a href="limit_lab.html">limit_lab →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

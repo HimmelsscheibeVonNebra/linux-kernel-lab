@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>file_read — 복습과 파일 프로그램 4개 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class03-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">3주차 1차시</a><span class="sep">/</span><span>file_read</span></nav>
+  <header>
+    <h1>file_read</h1>
+    <p>16바이트 버퍼로 read를 반복해 0(EOF)이 나올 때까지 읽고, 실제 읽은 바이트 수만큼만 표준 출력에 쓴다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class03-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="printf '0123456789abcdefghijklmnopqrstuv' &gt; long.txt; ./file_read long.txt; echo" title="터미널에서 실행" aria-label="실행: printf '0123456789abcdefghijklmnopqrstuv' &gt; long.txt; ./file_read long.txt; echo">▶</button><code>printf '0123456789abcdefghijklmnopqrstuv' &gt; long.txt; ./file_read long.txt; echo</code></div>
+          <p>32바이트 파일 내용이 그대로 출력된다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="strace -e trace=read ./file_read long.txt &gt; /dev/null" title="터미널에서 실행" aria-label="실행: strace -e trace=read ./file_read long.txt &gt; /dev/null">▶</button><code>strace -e trace=read ./file_read long.txt &gt; /dev/null</code></div>
+          <p>마지막 세 read의 반환값 16, 16, 0을 찾는다. 0이 EOF다. 앞쪽 read는 라이브러리 로딩이다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./file_read long.txt &gt; copy.txt; wc -c long.txt copy.txt" title="터미널에서 실행" aria-label="실행: ./file_read long.txt &gt; copy.txt; wc -c long.txt copy.txt">▶</button><code>./file_read long.txt &gt; copy.txt; wc -c long.txt copy.txt</code></div>
+          <p>복사본 크기가 원본과 같은 32바이트인지 확인한다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="printf 'A\000B' &gt; binary.dat; ./file_read binary.dat | hexdump -C" title="터미널에서 실행" aria-label="실행: printf 'A\000B' &gt; binary.dat; ./file_read binary.dat | hexdump -C">▶</button><code>printf 'A\000B' &gt; binary.dat; ./file_read binary.dat | hexdump -C</code></div>
+          <p>NUL 바이트(00)도 길이 기반으로 그대로 전달된다: 41 00 42.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd=": &gt; empty.txt; ./file_read empty.txt; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: : &gt; empty.txt; ./file_read empty.txt; echo &quot;exit=$?&quot;">▶</button><code>: &gt; empty.txt; ./file_read empty.txt; echo &quot;exit=$?&quot;</code></div>
+          <p>빈 파일은 첫 read가 0을 반환하며 정상 종료(0)한다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./file_read missing.txt; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./file_read missing.txt; echo &quot;exit=$?&quot;">▶</button><code>./file_read missing.txt; echo &quot;exit=$?&quot;</code></div>
+          <p>없는 파일은 open이 실패해 오류 메시지와 종료 상태 1이 나온다.</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>file_read.c <span class="muted">30줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln">#include &quot;io_helpers.h&quot;</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc != 2) {</span>
+<span class="ln">        fprintf(stderr, &quot;Usage: %s FILE\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    int fd = open(argv[1], O_RDONLY);</span>
+<span class="ln">    if (fd == -1) { perror(argv[1]); return 1; }</span>
+<span class="ln">    unsigned char buf[16]; /* Small on purpose: observe repeated reads. */</span>
+<span class="ln">    int status = 0;</span>
+<span class="ln">    for (;;) {</span>
+<span class="ln">        ssize_t n = read(fd, buf, sizeof buf);</span>
+<span class="ln">        if (n == 0) break;</span>
+<span class="ln">        if (n == -1) {</span>
+<span class="ln">            if (errno == EINTR) continue;</span>
+<span class="ln">            perror(&quot;read&quot;); status = 1; break;</span>
+<span class="ln">        }</span>
+<span class="ln">        if (write_all(STDOUT_FILENO, buf, (size_t)n) == -1) {</span>
+<span class="ln">            perror(&quot;write stdout&quot;); status = 1; break;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    if (close(fd) == -1) { perror(&quot;close&quot;); status = 1; }</span>
+<span class="ln">    return status;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+    <details class="source">
+      <summary>io_helpers.h <span class="muted">22줄</span></summary>
+      <pre class="code"><code><span class="ln">#ifndef IO_HELPERS_H</span>
+<span class="ln">#define IO_HELPERS_H</span>
+<span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;stddef.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln">/* Blocking descriptors. Retry interruptions and advance after partial writes. */</span>
+<span class="ln">static int write_all(int fd, const void *data, size_t count)</span>
+<span class="ln">{</span>
+<span class="ln">    const unsigned char *p = data;</span>
+<span class="ln">    while (count &gt; 0) {</span>
+<span class="ln">        ssize_t n = write(fd, p, count);</span>
+<span class="ln">        if (n == -1) {</span>
+<span class="ln">            if (errno == EINTR) continue;</span>
+<span class="ln">            return -1;</span>
+<span class="ln">        }</span>
+<span class="ln">        if (n == 0) { errno = EIO; return -1; }</span>
+<span class="ln">        p += (size_t)n;</span>
+<span class="ln">        count -= (size_t)n;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln">#endif</span></code></pre>
+    </details>
+  </section>
+  <nav class="pager">
+    <a href="file_write.html">← file_write</a>
+    <a href="file_seek.html">file_seek →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

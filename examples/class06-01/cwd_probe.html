@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>cwd_probe — 프로세스 정체성·인자·환경 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class06-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">6주차 1차시</a><span class="sep">/</span><span>cwd_probe</span></nav>
+  <header>
+    <h1>cwd_probe</h1>
+    <p>getcwd를 버퍼 전달 방식과 (NULL, 0) 할당 방식 두 가지로 호출하고, 인자가 있으면 chdir(2) 후 다시 조회합니다. 실패 경로(ENOENT·ENOTDIR)도 확인합니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class06-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./cwd_probe" title="터미널에서 실행" aria-label="실행: ./cwd_probe">▶</button><code>./cwd_probe</code></div>
+          <p>cwd와 cwd_alloc 두 방식의 결과가 같습니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./cwd_probe /tmp" title="터미널에서 실행" aria-label="실행: ./cwd_probe /tmp">▶</button><code>./cwd_probe /tmp</code></div>
+          <p>after_chdir=/tmp로 바뀝니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="pwd" title="터미널에서 실행" aria-label="실행: pwd">▶</button><code>pwd</code></div>
+          <p>부모 셸의 작업 디렉토리는 그대로입니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./cwd_probe /no/such/dir; echo &quot;status=$?&quot;" title="터미널에서 실행" aria-label="실행: ./cwd_probe /no/such/dir; echo &quot;status=$?&quot;">▶</button><code>./cwd_probe /no/such/dir; echo &quot;status=$?&quot;</code></div>
+          <p>없는 경로는 'No such file or directory'와 종료 상태 1입니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./cwd_probe /proc/version; echo &quot;status=$?&quot;" title="터미널에서 실행" aria-label="실행: ./cwd_probe /proc/version; echo &quot;status=$?&quot;">▶</button><code>./cwd_probe /proc/version; echo &quot;status=$?&quot;</code></div>
+          <p>파일을 가리키면 'Not a directory'(ENOTDIR)로 실패합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="readlink /proc/$$/cwd" title="터미널에서 실행" aria-label="실행: readlink /proc/$$/cwd">▶</button><code>readlink /proc/$$/cwd</code></div>
+          <p>커널이 기록한 셸의 작업 디렉토리를 /proc에서 확인합니다.</p>
+        </li>
+      </ol>
+      <p class="callout">README의 /etc/hosts는 게스트에 없을 수 있어 항상 존재하는 일반 파일 /proc/version으로 ENOTDIR을 확인합니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>cwd_probe.c <span class="muted">58줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* getcwd는 상대 경로를 절대 경로로 푸는 기준인 작업 디렉터리를</span>
+<span class="ln">   알려 준다. 호출 형태는 두 가지다. 호출자가 버퍼를 주거나,</span>
+<span class="ln">   (NULL, 0)으로 크기를 정해 달라고 요청하거나. chdir은 이</span>
+<span class="ln">   프로세스의 작업 디렉터리만 바꾼다. 부모 셸은 그대로다. */</span>
+<span class="ln">static int show_cwd(const char *label)</span>
+<span class="ln">{</span>
+<span class="ln">    char buf[4096];</span>
+<span class="ln">    if (getcwd(buf, sizeof buf) == NULL) {</span>
+<span class="ln">        perror(label);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;%s=%s\n&quot;, label, buf);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int show_cwd_alloc(const char *label)</span>
+<span class="ln">{</span>
+<span class="ln">    char *p = getcwd(NULL, 0);</span>
+<span class="ln">    if (p == NULL) {</span>
+<span class="ln">        perror(label);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;%s=%s\n&quot;, label, p);</span>
+<span class="ln">    free(p);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc &gt; 2) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s [directory]\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (show_cwd(&quot;cwd&quot;) != 0) {</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (show_cwd_alloc(&quot;cwd_alloc&quot;) != 0) {</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (argc == 2) {</span>
+<span class="ln">        if (chdir(argv[1]) == -1) {</span>
+<span class="ln">            perror(argv[1]);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">        if (show_cwd(&quot;after_chdir&quot;) != 0) {</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="env_dump.html">← env_dump</a>
+    <a href="procinfo.html">procinfo →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

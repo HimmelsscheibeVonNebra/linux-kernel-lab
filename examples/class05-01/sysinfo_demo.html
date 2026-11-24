@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sysinfo_demo — 시스템 정보와 자원 한계 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class05-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">5주차 1차시</a><span class="sep">/</span><span>sysinfo_demo</span></nav>
+  <header>
+    <h1>sysinfo_demo</h1>
+    <p>Linux 전용 sysinfo(2)로 uptime, 부하 평균(고정소수점), 프로세스 수, 전체·여유 메모리를 출력합니다. 조건부 컴파일로 플랫폼을 구분하는 예입니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class05-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./sysinfo_demo" title="터미널에서 실행" aria-label="실행: ./sysinfo_demo">▶</button><code>./sysinfo_demo</code></div>
+          <p>uptime, loadavg, procs, totalram, freeram, mem_unit을 확인합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="cat /proc/uptime" title="터미널에서 실행" aria-label="실행: cat /proc/uptime">▶</button><code>cat /proc/uptime</code></div>
+          <p>첫 값이 uptime과 같은 규모(초)인지 봅니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="cat /proc/loadavg" title="터미널에서 실행" aria-label="실행: cat /proc/loadavg">▶</button><code>cat /proc/loadavg</code></div>
+          <p>loads 필드를 65536으로 나눈 값과 앞의 세 숫자를 비교합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="head -2 /proc/meminfo" title="터미널에서 실행" aria-label="실행: head -2 /proc/meminfo">▶</button><code>head -2 /proc/meminfo</code></div>
+          <p>MemTotal·MemFree(kB)를 totalram·freeram(바이트)과 비교합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="strace -e trace=sysinfo ./sysinfo_demo" title="터미널에서 실행" aria-label="실행: strace -e trace=sysinfo ./sysinfo_demo">▶</button><code>strace -e trace=sysinfo ./sysinfo_demo</code></div>
+          <p>sysinfo 시스템 호출이 채운 구조체를 확인합니다.</p>
+        </li>
+      </ol>
+      <p class="callout">32비트에서는 unsigned long이 4바이트라 totalram*mem_unit이 4GiB 이상이면 넘치지만, 이 VM은 256MB라 문제없습니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>sysinfo_demo.c <span class="muted">44줄</span></summary>
+      <pre class="code"><code><span class="ln">/* sysinfo(2)는 Linux 전용 인터페이스다.</span>
+<span class="ln">   이 파일에서는 조건부 컴파일로 지원 환경을 구분한다. */</span>
+<span class="ln">#if defined(__linux__)</span>
+<span class="ln"> </span>
+<span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;sys/sysinfo.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">int main(void)</span>
+<span class="ln">{</span>
+<span class="ln">    struct sysinfo si;</span>
+<span class="ln">    if (sysinfo(&amp;si) == -1) {</span>
+<span class="ln">        perror(&quot;sysinfo&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;uptime=%ld sec\n&quot;, si.uptime);</span>
+<span class="ln">    /* loads는 65536을 1로 하는 고정소수점 값이다. */</span>
+<span class="ln">    printf(&quot;loadavg=%.2f %.2f %.2f\n&quot;,</span>
+<span class="ln">           (double)si.loads[0] / (1 &lt;&lt; SI_LOAD_SHIFT),</span>
+<span class="ln">           (double)si.loads[1] / (1 &lt;&lt; SI_LOAD_SHIFT),</span>
+<span class="ln">           (double)si.loads[2] / (1 &lt;&lt; SI_LOAD_SHIFT));</span>
+<span class="ln">    printf(&quot;procs=%u\n&quot;, si.procs);</span>
+<span class="ln">    /* 램 크기는 필드 값에 mem_unit을 곱해 바이트로 환산한다. */</span>
+<span class="ln">    printf(&quot;totalram=%lu bytes\n&quot;, si.totalram * (unsigned long)si.mem_unit);</span>
+<span class="ln">    printf(&quot;freeram=%lu bytes\n&quot;, si.freeram * (unsigned long)si.mem_unit);</span>
+<span class="ln">    printf(&quot;mem_unit=%u\n&quot;, si.mem_unit);</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">#else /* not __linux__ */</span>
+<span class="ln"> </span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">int main(void)</span>
+<span class="ln">{</span>
+<span class="ln">    puts(&quot;sysinfo(2) is Linux-only: not available on this system&quot;);</span>
+<span class="ln">    return 1;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">#endif</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="proc_probe.html">← proc_probe</a>
+    <span></span>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

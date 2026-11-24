@@ -1,0 +1,65 @@
+{
+  "class": "class12-02",
+  "title": "양방향 파이프 · 파이프라인 · FIFO 서버",
+  "summary": "파이프 두 개로 묻고 답하는 양방향 통신과 그때 생기는 교착, 여러 단계 파이프라인을 반복문으로 만드는 방법, FIFO로 여러 클라이언트를 받는 서버를 다루는 예제입니다.",
+  "examples": [
+    {
+      "name": "pipe_two",
+      "source": "pipe_two.c",
+      "summary": "방향마다 파이프를 하나씩(req, rep) 만들어 부모가 ping을 보내고 자식이 pong으로 답합니다. 각자 쓰지 않는 끝점을 닫는 규칙을 보여 줍니다.",
+      "steps": [
+        { "cmd": "./pipe_two", "note": "req = 3,4  rep = 5,6 으로 끝점 넷이 만들어지고, 자식이 질문 5바이트(ping)를 받고 부모가 답 5바이트(pong)를 받는다." },
+        { "cmd": "strace -f -e trace=pipe,pipe2,read,write ./pipe_two 2>&1 | tail -15", "note": "부모의 write(4, \"ping\\n\") → 자식의 read(3) → 자식의 write(6, \"pong\\n\") → 부모의 read(5) 순서를 프로세스(pid)별로 확인한다." }
+      ],
+      "manual": false,
+      "expect": "[부모] 답 5바이트: pong"
+    },
+    {
+      "name": "pipetalk",
+      "source": "pipetalk.c",
+      "summary": "파이프 두 개로 부모와 자식이 묻고 답하는 규약(ask)과, 서로 기다리다 멈추는 교착 세 가지를 재현합니다: 둘 다 먼저 읽기(both), 답이 stdio 버퍼에 갇힘(mute), 두 파이프가 모두 가득 참(flood). fix는 쓰는 일을 다른 프로세스에 맡겨 flood를 해결합니다.",
+      "steps": [
+        { "cmd": "./pipetalk ask", "note": "질문 셋(1 2, 30 40, 500 600)에 답 3, 70, 1100이 차례로 오고, 부모가 닫으면 자식이 EOF를 받고 종료 코드 0으로 끝난다." },
+        { "cmd": "timeout 2 ./pipetalk both; echo \"exit=$?\"", "note": "부모와 자식이 둘 다 먼저 read를 해서 영원히 기다린다. 2초 뒤 timeout이 끝낸다." },
+        { "cmd": "timeout 2 ./pipetalk mute; echo \"exit=$?\"", "note": "자식이 fflush를 하지 않아 답이 stdio 버퍼에만 있고 파이프로 나가지 않는다. 첫 질문 뒤에 멈춘다." },
+        { "cmd": "./pipetalk flood 20000", "note": "양이 적으면(파이프 용량 65536바이트 이하) 다 쓰고 나서 읽어도 문제없이 20000바이트를 돌려받는다." },
+        { "cmd": "timeout 3 ./pipetalk flood 1000000; echo \"exit=$?\"", "note": "[보냄] 131072바이트에서 멈춘다. 두 파이프(65536 × 2)가 모두 가득 차 부모와 자식이 서로 write에서 잠든 교착이다." },
+        { "cmd": "./pipetalk fix 1000000", "note": "쓰는 일을 둘째 자식에게 맡기고 부모는 동시에 읽으므로 1000000바이트를 모두 돌려받는다." }
+      ],
+      "manual": false,
+      "expect": "돌려받은 양 = 1000000바이트",
+      "notes": "both · mute · flood 1000000 은 스스로 끝나지 않는 것이 정상이라 timeout으로 끝냅니다 (BusyBox에서는 exit=143). 부모가 죽으면 자식은 EOF나 SIGPIPE를 받아 함께 끝나므로 남는 프로세스는 없습니다."
+    },
+    {
+      "name": "pipeline",
+      "source": "pipeline.c",
+      "summary": "셸의 CMD1 | CMD2 | ... | CMDN 을 반복문 하나로 만듭니다. 부모는 '앞 파이프의 읽기 끝' 하나만 들고 다니며 단계마다 pipe · fork · dup2 · execvp를 하고, 모두 띄운 뒤 waitpid로 거둡니다.",
+      "steps": [
+        { "cmd": "./pipeline ls -- sort -r -- head -3", "note": "ls | sort -r | head -3 과 같은 결과가 나오고, stderr에 단계별 종료 코드가 보고된다." },
+        { "cmd": "./pipeline -v ls -- cat -- wc -l", "note": "-v: 단계마다 부모의 장부(입력 fd, 출력 fd, 새 파이프)를 보여 준다. 첫 단계는 입력 -1, 마지막 단계는 출력 -1이다." },
+        { "cmd": "./pipeline yes -- head -2 -- wc -l", "note": "결과는 2. head가 끝나면 yes는 시그널 13(SIGPIPE)으로 죽는다." },
+        { "cmd": "./pipeline false -- cat -- true; echo \"exit=$?\"", "note": "앞 단계가 실패해도(false: 종료 코드 1) 전체 종료 코드는 마지막 단계의 것(0)이다." },
+        { "cmd": "time ./pipeline sleep 1 -- sleep 1 -- sleep 1", "note": "세 단계가 동시에 돌기 때문에 전체가 3초가 아니라 약 1초 걸린다." },
+        { "cmd": "./pipeline -k ls -- timeout 2 cat -- timeout 2 wc -l; echo \"exit=$?\"", "note": "-k: 부모가 쓰기 끝을 닫지 않아(뒤 단계의 자식에게도 복사된다) cat과 wc가 EOF를 받지 못한다. ls만 바로 끝나고, 나머지는 2초 뒤 timeout이 보낸 시그널 15로 끝난다." }
+      ],
+      "manual": false,
+      "expect": "[3] head: 종료 코드 0",
+      "notes": "-k 실험에서 cat과 wc는 자기 자신이 앞 파이프의 쓰기 끝을 물려받아 쥐고 있어서 부모를 죽여도 끝나지 않습니다. 그래서 각 단계에 timeout 2를 씌워 스스로 끝나게 했습니다 (보고에는 명령 이름이 timeout으로 나옵니다)."
+    },
+    {
+      "name": "fifosrv",
+      "source": "fifosrv.c",
+      "summary": "FIFO 하나로 여러 클라이언트의 요청을 받는 덧셈 서버입니다. 요청(고정 길이 구조체)은 모두 서버 FIFO로 오고, 답은 클라이언트가 PID를 붙여 만든 전용 FIFO로 돌려보냅니다.",
+      "steps": [
+        { "cmd": "./fifosrv serve calc & sleep 1; ls -l calc", "note": "서버가 FIFO calc를 만들고 첫 클라이언트를 기다린다 (ls -l 맨 앞 글자가 p)." },
+        { "cmd": "./fifosrv ask calc 3 4", "note": "클라이언트가 calc.PID 응답 FIFO를 만들고 요청을 보낸 뒤 답 7을 받는다. 서버 쪽 기록도 함께 출력된다." },
+        { "cmd": "./fifosrv ask calc 10 -25", "note": "클라이언트가 떠난 뒤에도 서버는 계속 일한다 (서버가 쓰기 끝을 하나 쥐고 있어 EOF가 오지 않는다). 답은 -15." },
+        { "cmd": "./fifosrv burst calc 10", "note": "자식 10개가 동시에 묻는다. 요청이 PIPE_BUF 이하라 섞이지 않고, 응답 FIFO가 클라이언트마다 달라 10개 모두 맞는 답을 받는다." },
+        { "cmd": "ls calc*", "note": "클라이언트의 응답 FIFO(calc.PID)는 모두 지워지고 서버 FIFO calc만 남아 있다." },
+        { "cmd": "./fifosrv stop calc; wait", "note": "pid가 0인 요청을 보내 서버를 끝낸다. 서버는 요청 12개를 처리했다고 보고하고 FIFO를 지운다." }
+      ],
+      "manual": false,
+      "expect": "요청 12개를 처리하고 끝낸다"
+    }
+  ]
+}

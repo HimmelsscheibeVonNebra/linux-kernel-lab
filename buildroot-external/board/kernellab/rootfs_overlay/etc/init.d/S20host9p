@@ -1,0 +1,15 @@
+#!/bin/sh
+# Boot-time mounts for the lab: browser-side 9p share and POSIX mqueue fs.
+
+case "$1" in
+start)
+	mount -t 9p -o trans=virtio,version=9p2000.L host9p /mnt/host 2>/dev/null \
+		|| echo "host9p: not available (file upload disabled)"
+	mkdir -p /dev/mqueue
+	mount -t mqueue none /dev/mqueue
+	;;
+stop)
+	umount /mnt/host /dev/mqueue 2>/dev/null
+	;;
+esac
+exit 0

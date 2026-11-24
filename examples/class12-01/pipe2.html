@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pipe2 — 파이프 (pipe · dup2 · popen · FIFO) · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class12-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">12주차 1차시</a><span class="sep">/</span><span>pipe2</span></nav>
+  <header>
+    <h1>pipe2</h1>
+    <p>셸의 CMD1 | CMD2 &gt; FILE 을 pipe · fork · dup2 · execvp로 직접 만듭니다. -o FILE은 CMD2의 표준 출력을 파일로 돌리고, -k는 부모가 쓰기 끝을 닫지 않아 EOF가 오지 않는 상황을 재현합니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class12-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pipe2 ls -- wc -l" title="터미널에서 실행" aria-label="실행: ./pipe2 ls -- wc -l">▶</button><code>./pipe2 ls -- wc -l</code></div>
+          <p>ls | wc -l 과 같은 결과가 나온다. stderr에 두 자식의 종료 코드가 따로 보고된다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pipe2 -o out.txt ls -- grep pipe; cat out.txt; rm -f out.txt" title="터미널에서 실행" aria-label="실행: ./pipe2 -o out.txt ls -- grep pipe; cat out.txt; rm -f out.txt">▶</button><code>./pipe2 -o out.txt ls -- grep pipe; cat out.txt; rm -f out.txt</code></div>
+          <p>ls | grep pipe &gt; out.txt 와 같다. 화면에는 종료 보고만 나오고 결과는 out.txt에 들어간다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pipe2 yes -- head -2" title="터미널에서 실행" aria-label="실행: ./pipe2 yes -- head -2">▶</button><code>./pipe2 yes -- head -2</code></div>
+          <p>head가 두 줄만 읽고 끝나면 yes는 읽는 쪽이 없는 파이프에 쓰다가 시그널 13(SIGPIPE)으로 죽는다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pipe2 ls -- grep zzz; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./pipe2 ls -- grep zzz; echo &quot;exit=$?&quot;">▶</button><code>./pipe2 ls -- grep zzz; echo &quot;exit=$?&quot;</code></div>
+          <p>셸처럼 마지막 명령(grep)의 종료 코드 1이 pipe2의 종료 코드가 된다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="timeout 2 ./pipe2 -k ls -- wc -l; echo &quot;exit=$?&quot;; sleep 1" title="터미널에서 실행" aria-label="실행: timeout 2 ./pipe2 -k ls -- wc -l; echo &quot;exit=$?&quot;; sleep 1">▶</button><code>timeout 2 ./pipe2 -k ls -- wc -l; echo &quot;exit=$?&quot;; sleep 1</code></div>
+          <p>-k: 부모가 쓰기 끝을 쥐고 있어 wc가 EOF를 받지 못하고 멈춘다. 2초 뒤 부모가 죽어 쓰기 끝이 닫히면 그제야 wc가 줄 수를 출력한다.</p>
+        </li>
+      </ol>
+      <p class="callout">ls · wc · grep · yes · head는 BusyBox 애플릿이며 execvp가 PATH에서 찾아 실행합니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>pipe2.c <span class="muted">108줄</span></summary>
+      <pre class="code"><code><span class="ln">/* pipe2.c — 셸의 &quot;CMD1 | CMD2 &gt; FILE&quot;을 pipe · fork · dup2 · exec로 만든다.</span>
+<span class="ln"> * 사용법: ./pipe2 [-k] [-o FILE] CMD1 [ARG...] -- CMD2 [ARG...]</span>
+<span class="ln"> *   -o FILE  CMD2의 표준 출력을 FILE로 보낸다 (셸의 &gt; FILE)</span>
+<span class="ln"> *   -k       부모가 쓰기 끝을 닫지 않는다 (EOF가 오지 않는 실험)</span>
+<span class="ln"> */</span>
+<span class="ln">#include &lt;fcntl.h&gt;                  /* open, O_WRONLY, O_CREAT, O_TRUNC */</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;                 /* strcmp, strsignal */</span>
+<span class="ln">#include &lt;sys/wait.h&gt;               /* waitpid, WIFSIGNALED 등 */</span>
+<span class="ln">#include &lt;unistd.h&gt;                 /* pipe, fork, dup2, execvp, close */</span>
+<span class="ln"> </span>
+<span class="ln">static void die(const char *what)</span>
+<span class="ln">{</span>
+<span class="ln">    perror(what);</span>
+<span class="ln">    exit(1);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void usage(const char *prog)</span>
+<span class="ln">{</span>
+<span class="ln">    fprintf(stderr, &quot;usage: %s [-k] [-o FILE] CMD1 ... -- CMD2 ...\n&quot;, prog);</span>
+<span class="ln">    exit(2);                        /* 사용법 오류는 2 */</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* 자식 하나를 기다려 끝난 방식을 stderr에 적고, 셸의 $? 값을 돌려준다. */</span>
+<span class="ln">static int report(const char *name, pid_t pid)</span>
+<span class="ln">{</span>
+<span class="ln">    int st;                         /* 자식의 종료 상태 */</span>
+<span class="ln"> </span>
+<span class="ln">    if (waitpid(pid, &amp;st, 0) == -1)  /* 이 자식이 끝날 때까지 기다린다 */</span>
+<span class="ln">        die(&quot;waitpid&quot;);</span>
+<span class="ln">    if (WIFSIGNALED(st)) {          /* 시그널로 죽었다 (예: SIGPIPE 13) */</span>
+<span class="ln">        fprintf(stderr, &quot;[pipe2] %s: 시그널 %d (%s)\n&quot;, name, WTERMSIG(st),</span>
+<span class="ln">                strsignal(WTERMSIG(st)));</span>
+<span class="ln">        return 128 + WTERMSIG(st);  /* 셸 관례: 128 + 시그널 번호 */</span>
+<span class="ln">    }</span>
+<span class="ln">    fprintf(stderr, &quot;[pipe2] %s: 종료 코드 %d\n&quot;, name, WEXITSTATUS(st));</span>
+<span class="ln">    return WEXITSTATUS(st);         /* exit나 return으로 끝난 값 */</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    int keep = 0, i = 1;            /* keep: -k 여부, i: argv를 훑는 위치 */</span>
+<span class="ln">    const char *out = NULL;         /* -o FILE의 FILE */</span>
+<span class="ln"> </span>
+<span class="ln">    while (i &lt; argc &amp;&amp; argv[i][0] == '-') {     /* 옵션: -k, -o FILE */</span>
+<span class="ln">        if (strcmp(argv[i], &quot;-k&quot;) == 0)</span>
+<span class="ln">            keep = 1;</span>
+<span class="ln">        else if (strcmp(argv[i], &quot;-o&quot;) == 0 &amp;&amp; i + 1 &lt; argc)</span>
+<span class="ln">            out = argv[++i];</span>
+<span class="ln">        else</span>
+<span class="ln">            usage(argv[0]);</span>
+<span class="ln">        i++;</span>
+<span class="ln">    }</span>
+<span class="ln">    char **left = &amp;argv[i], **right = NULL;  /* left: CMD1의 인자 배열 */</span>
+<span class="ln">    for (; i &lt; argc; i++) {</span>
+<span class="ln">        if (strcmp(argv[i], &quot;--&quot;) == 0) {   /* NULL로 바꿔 둘로 자른다 */</span>
+<span class="ln">            argv[i] = NULL;</span>
+<span class="ln">            right = &amp;argv[i + 1];   /* right: CMD2의 인자 배열 */</span>
+<span class="ln">            break;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    if (right == NULL || left[0] == NULL || right[0] == NULL)  /* -- 가 없거나 한쪽이 비었다 */</span>
+<span class="ln">        usage(argv[0]);</span>
+<span class="ln"> </span>
+<span class="ln">    int fd[2];                      /* fd[0]: 읽기 끝, fd[1]: 쓰기 끝 */</span>
+<span class="ln">    if (pipe(fd) == -1)                 /* fork보다 먼저 만든다 */</span>
+<span class="ln">        die(&quot;pipe&quot;);</span>
+<span class="ln"> </span>
+<span class="ln">    pid_t p1 = fork();              /* 첫째 자식: CMD1 */</span>
+<span class="ln">    if (p1 == -1)</span>
+<span class="ln">        die(&quot;fork&quot;);</span>
+<span class="ln">    if (p1 == 0) {                      /* 왼쪽 명령: 표준 출력 → 파이프 */</span>
+<span class="ln">        dup2(fd[1], STDOUT_FILENO);  /* 쓰기 끝을 1번 자리에 */</span>
+<span class="ln">        close(fd[0]);               /* 읽기 끝은 쓰지 않는다 */</span>
+<span class="ln">        close(fd[1]);                   /* 1번이 대신하므로 닫는다 */</span>
+<span class="ln">        execvp(left[0], left);      /* 성공하면 돌아오지 않는다 */</span>
+<span class="ln">        perror(left[0]);            /* 여기 왔다면 exec 실패 */</span>
+<span class="ln">        _exit(127);                 /* 셸 관례: 명령을 못 찾으면 127 */</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    pid_t p2 = fork();              /* 둘째 자식: CMD2 */</span>
+<span class="ln">    if (p2 == -1)</span>
+<span class="ln">        die(&quot;fork&quot;);</span>
+<span class="ln">    if (p2 == 0) {                    /* 오른쪽 명령: 표준 입력 ← 파이프 */</span>
+<span class="ln">        dup2(fd[0], STDIN_FILENO);  /* 읽기 끝을 0번 자리에 */</span>
+<span class="ln">        close(fd[0]);               /* 0번이 대신하므로 닫는다 */</span>
+<span class="ln">        close(fd[1]);               /* 안 닫으면 자기 때문에 EOF가 안 온다 */</span>
+<span class="ln">        if (out != NULL) {              /* &gt; FILE: 표준 출력을 파일로 */</span>
+<span class="ln">            int o = open(out, O_WRONLY | O_CREAT | O_TRUNC, 0644);</span>
+<span class="ln">            if (o == -1) {</span>
+<span class="ln">                perror(out);</span>
+<span class="ln">                _exit(1);           /* 파일을 못 열면 명령을 실행하지 않는다 */</span>
+<span class="ln">            }</span>
+<span class="ln">            dup2(o, STDOUT_FILENO);  /* 파일을 1번 자리에 */</span>
+<span class="ln">            close(o);               /* 1번이 대신하므로 닫는다 */</span>
+<span class="ln">        }</span>
+<span class="ln">        execvp(right[0], right);    /* 0번은 파이프, 1번은 터미널이나 파일 */</span>
+<span class="ln">        perror(right[0]);           /* 여기 왔다면 exec 실패 */</span>
+<span class="ln">        _exit(127);</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    close(fd[0]);                       /* 부모는 파이프를 쓰지 않는다 */</span>
+<span class="ln">    if (!keep)                      /* -k면 다음 줄을 건너뛴다 */</span>
+<span class="ln">        close(fd[1]);                   /* 안 닫으면 CMD2에 EOF가 안 온다 */</span>
+<span class="ln">    report(left[0], p1);            /* close 뒤에 기다린다. 바꾸면 안 끝난다 */</span>
+<span class="ln">    return report(right[0], p2);        /* 마지막 명령의 상태로 끝난다 */</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="pipemsg.html">← pipemsg</a>
+    <a href="pipeio.html">pipeio →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

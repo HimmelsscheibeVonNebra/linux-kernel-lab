@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>4주차 2차시 파일 속성 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body data-root="../../">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><span>4주차 2차시</span></nav>
+  <header>
+    <h1>파일 속성</h1>
+    <p>stat/lstat으로 파일 속성을 조회하고 권한(umask·fchmod), 희소 파일의 크기와 할당량, 시간 속성(futimens), unlink 이후의 열린 FD를 관찰하는 예제입니다.</p>
+  </header>
+  <main class="list">
+    <ul class="cards">
+      <li><a href="file_attr.html"><strong>file_attr</strong><span>기본은 lstat, --follow를 주면 stat으로 종류, inode, 링크 수, 권한(rwx 문자열), 소유자, 크기·블록 수, 나노초 단위 atime/mtime/ctime을 출력합니다.</span></a></li>
+      <li><a href="mode_demo.html"><strong>mode_demo</strong><span>umask를 바꿔 가며 openat(O_CREAT|O_EXCL)·mkdirat으로 파일과 디렉토리를 만들고, fchmod 전후의 권한을 fstat으로 확인합니다.</span></a></li>
+      <li><a href="sparse_demo.html"><strong>sparse_demo</strong><span>새 파일에서 lseek로 1MiB 위치로 이동한 뒤 1바이트를 써서 희소 파일을 만들고, 논리적 크기(st_size)와 할당 블록 수(st_blocks)를 비교합니다.</span></a></li>
+      <li><a href="time_attrs.html"><strong>time_attrs</strong><span>futimens(2)로 atime·mtime을 지정한 값(2024-01-01, 2024-01-02 UTC)으로 바꾸고, fchmod 뒤에도 그 값이 유지되며 ctime만 현재 시각임을 보여 줍니다.</span></a></li>
+      <li><a href="fd_unlink_demo.html"><strong>fd_unlink_demo</strong><span>mkstemp로 만든 임시 파일을 unlink한 뒤에도 열린 FD로 fstat(links=0)과 read가 가능함을 보여 줍니다. 이름과 inode의 수명이 다르다는 예제입니다.</span></a></li>
+    </ul>
+  </main>
+</body>
+</html>

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>shmrace — 공유 메모리 · 세마포어 · 스레드 동기화 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class13-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">13주차 2차시</a><span class="sep">/</span><span>shmrace</span></nav>
+  <header>
+    <h1>shmrace</h1>
+    <p>공유 메모리 /w13_counter 의 count를 여러 프로세스가 잠금 없이 올려, 갱신이 사라지는 경쟁 상태를 관찰합니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class13-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./shmrace rm 2&gt;/dev/null; ./shmrace init" title="터미널에서 실행" aria-label="실행: ./shmrace rm 2&gt;/dev/null; ./shmrace init">▶</button><code>./shmrace rm 2&gt;/dev/null; ./shmrace init</code></div>
+          <p>공유 메모리를 만들고 count = 0으로 시작한다 (세마포어도 함께 초기화한다).</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./shmrace add 1000000; ./shmrace show" title="터미널에서 실행" aria-label="실행: ./shmrace add 1000000; ./shmrace show">▶</button><code>./shmrace add 1000000; ./shmrace show</code></div>
+          <p>프로세스 하나만 올리면 정확히 count = 1000000 이다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="for i in 1 2 3 4; do ./shmrace add 5000000 &amp; done; wait" title="터미널에서 실행" aria-label="실행: for i in 1 2 3 4; do ./shmrace add 5000000 &amp; done; wait">▶</button><code>for i in 1 2 3 4; do ./shmrace add 5000000 &amp; done; wait</code></div>
+          <p>프로세스 4개가 잠금 없이 500만 번씩 동시에 올린다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./shmrace show" title="터미널에서 실행" aria-label="실행: ./shmrace show">▶</button><code>./shmrace show</code></div>
+          <p>잃은 것이 없다면 21000000 이어야 한다. 그보다 작으면 그만큼 갱신이 사라진 것이다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./shmrace rm" title="터미널에서 실행" aria-label="실행: ./shmrace rm">▶</button><code>./shmrace rm</code></div>
+          <p>공유 메모리의 이름을 지운다.</p>
+        </li>
+      </ol>
+      <p class="callout">이 VM은 CPU가 1개라서 경쟁은 프로세스가 '읽고 · 더하고 · 쓰는' 중간에 타이머 인터럽트로 교체될 때만 생깁니다. 그래서 반복 횟수를 크게(500만) 잡았지만 그래도 21000000이 그대로 나올 수 있습니다. 셋째·넷째 단계를 몇 번 반복해 보세요 (합계는 그만큼씩 늘어납니다). 32비트라 struct shared는 20바이트입니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>shmrace.c <span class="muted">35줄</span></summary>
+      <pre class="code"><code><span class="ln">/* shmrace.c — 공유 메모리의 값을 여러 프로세스가 잠금 없이 올린다</span>
+<span class="ln"> *   ./shmrace init     공유 메모리를 만들고 count = 0</span>
+<span class="ln"> *   ./shmrace add N    count를 N번 올린다 (잠금 없음)</span>
+<span class="ln"> *   ./shmrace show     지금 값을 본다</span>
+<span class="ln"> *   ./shmrace rm       이름을 지운다</span>
+<span class="ln"> */</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &quot;counter.h&quot;</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    const char *cmd = argc &gt; 1 ? argv[1] : &quot;&quot;;</span>
+<span class="ln"> </span>
+<span class="ln">    if (!strcmp(cmd, &quot;init&quot;) &amp;&amp; argc == 2) {</span>
+<span class="ln">        struct shared *s = attach(1);</span>
+<span class="ln">        if (sem_init(&amp;s-&gt;lock, 1, 1) == -1) { perror(&quot;sem_init&quot;); return 1; }</span>
+<span class="ln">        s-&gt;count = 0;</span>
+<span class="ln">        printf(&quot;만듦: %s (%zu바이트), count = 0\n&quot;, SHM_NAME, sizeof *s);</span>
+<span class="ln">    } else if (!strcmp(cmd, &quot;add&quot;) &amp;&amp; argc == 3) {</span>
+<span class="ln">        struct shared *s = attach(0);</span>
+<span class="ln">        long n = atol(argv[2]);</span>
+<span class="ln">        for (long i = 0; i &lt; n; i++)</span>
+<span class="ln">            s-&gt;count++;                 /* 읽고 · 더하고 · 쓴다: 세 단계 */</span>
+<span class="ln">        printf(&quot;[%d] %ld번 올림 → count = %ld\n&quot;, (int)getpid(), n, s-&gt;count);</span>
+<span class="ln">    } else if (!strcmp(cmd, &quot;show&quot;) &amp;&amp; argc == 2) {</span>
+<span class="ln">        printf(&quot;count = %ld\n&quot;, attach(0)-&gt;count);</span>
+<span class="ln">    } else if (!strcmp(cmd, &quot;rm&quot;) &amp;&amp; argc == 2) {</span>
+<span class="ln">        if (shm_unlink(SHM_NAME) == -1) { perror(&quot;shm_unlink&quot;); return 1; }</span>
+<span class="ln">        printf(&quot;지움: %s\n&quot;, SHM_NAME);</span>
+<span class="ln">    } else {</span>
+<span class="ln">        fprintf(stderr, &quot;사용법: %s init | add N | show | rm\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+    <details class="source">
+      <summary>counter.h <span class="muted">36줄</span></summary>
+      <pre class="code"><code><span class="ln">/* counter.h — shmrace와 semcount가 함께 쓰는 공유 메모리의 모양 */</span>
+<span class="ln">#ifndef COUNTER_H</span>
+<span class="ln">#define COUNTER_H</span>
+<span class="ln"> </span>
+<span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;semaphore.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;sys/mman.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">#define SHM_NAME &quot;/w13_counter&quot;</span>
+<span class="ln"> </span>
+<span class="ln">struct shared {                 /* 공유 메모리의 맨 앞에 이 구조체가 놓인다 */</span>
+<span class="ln">    sem_t lock;                 /* 2부에서 쓴다: 이진 세마포어 (1 = 열림) */</span>
+<span class="ln">    volatile long count;        /* 여러 프로세스가 함께 올리는 값 */</span>
+<span class="ln">};</span>
+<span class="ln"> </span>
+<span class="ln">/* 이름으로 열어 내 주소 공간에 붙인다. create이면 만들고 크기를 정한다 */</span>
+<span class="ln">static inline struct shared *attach(int create)</span>
+<span class="ln">{</span>
+<span class="ln">    int flags = create ? O_CREAT | O_EXCL | O_RDWR : O_RDWR;</span>
+<span class="ln">    int fd = shm_open(SHM_NAME, flags, 0600);</span>
+<span class="ln">    if (fd == -1) { perror(&quot;shm_open&quot;); exit(1); }</span>
+<span class="ln">    if (create &amp;&amp; ftruncate(fd, sizeof(struct shared)) == -1) {</span>
+<span class="ln">        perror(&quot;ftruncate&quot;);</span>
+<span class="ln">        exit(1);</span>
+<span class="ln">    }</span>
+<span class="ln">    struct shared *s = mmap(NULL, sizeof *s, PROT_READ | PROT_WRITE,</span>
+<span class="ln">                            MAP_SHARED, fd, 0);</span>
+<span class="ln">    if (s == MAP_FAILED) { perror(&quot;mmap&quot;); exit(1); }</span>
+<span class="ln">    close(fd);                  /* 매핑은 fd를 닫아도 남는다 */</span>
+<span class="ln">    return s;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">#endif</span></code></pre>
+    </details>
+  </section>
+  <nav class="pager">
+    <a href="shmhello.html">← shmhello</a>
+    <a href="semcount.html">semcount →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

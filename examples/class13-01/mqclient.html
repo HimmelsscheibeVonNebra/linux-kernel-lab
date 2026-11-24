@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mqclient — IPC와 POSIX 메시지 큐 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class13-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">13주차 1차시</a><span class="sep">/</span><span>mqclient</span></nav>
+  <header>
+    <h1>mqclient</h1>
+    <p>자기 응답 큐(/w13_rep.PID)를 먼저 만든 뒤 서버의 요청 큐에 요청을 넣고, mq_timedreceive로 최대 3초까지 답을 기다리는 클라이언트입니다. quit을 보내면 서버가 끝납니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class13-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./mqserver &amp; SRV=$!; sleep 1" title="터미널에서 실행" aria-label="실행: ./mqserver &amp; SRV=$!; sleep 1">▶</button><code>./mqserver &amp; SRV=$!; sleep 1</code></div>
+          <p>서버를 백그라운드로 띄우고 PID를 SRV에 적어 둔다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./mqclient apple &amp; ./mqclient banana &amp; ./mqclient cherry; sleep 1" title="터미널에서 실행" aria-label="실행: ./mqclient apple &amp; ./mqclient banana &amp; ./mqclient cherry; sleep 1">▶</button><code>./mqclient apple &amp; ./mqclient banana &amp; ./mqclient cherry; sleep 1</code></div>
+          <p>클라이언트 셋이 동시에 묻는다. 응답 큐가 PID마다 달라 각자 자기 답(APPLE, BANANA, CHERRY)을 받는다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="kill -STOP $SRV; time ./mqclient late; kill -CONT $SRV; sleep 1" title="터미널에서 실행" aria-label="실행: kill -STOP $SRV; time ./mqclient late; kill -CONT $SRV; sleep 1">▶</button><code>kill -STOP $SRV; time ./mqclient late; kill -CONT $SRV; sleep 1</code></div>
+          <p>서버를 멈춰 두면 클라이언트는 3초 뒤 '응답 없음: mq_timedreceive: Connection timed out'으로 포기한다. 서버를 다시 깨우면 뒤늦게 처리하려다 '응답 큐 없음'을 기록한다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./mqclient quit; wait" title="터미널에서 실행" aria-label="실행: ./mqclient quit; wait">▶</button><code>./mqclient quit; wait</code></div>
+          <p>quit 요청에는 응답이 없다. 서버가 요청 큐를 지우고 끝난다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="ls /dev/mqueue" title="터미널에서 실행" aria-label="실행: ls /dev/mqueue">▶</button><code>ls /dev/mqueue</code></div>
+          <p>요청 큐와 응답 큐가 모두 지워져 남은 것이 없다.</p>
+        </li>
+      </ol>
+      <p class="callout">mqclient는 mqserver가 떠 있어야 동작하므로 첫 단계에서 서버를 함께 띄웁니다. 셋째 단계는 타임아웃을 기다리느라 약 4초 걸립니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>mqclient.c <span class="muted">59줄</span></summary>
+      <pre class="code"><code><span class="ln">/* mqclient.c — 요청 하나를 보내고 자기 응답 큐에서 답을 기다린다 (최대 3초)</span>
+<span class="ln"> *   ./mqclient TEXT      (./mqclient quit 은 서버를 끝낸다)</span>
+<span class="ln"> */</span>
+<span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;mqueue.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;time.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln">#include &quot;proto.h&quot;</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc != 2) { fprintf(stderr, &quot;사용법: %s TEXT\n&quot;, argv[0]); return 2; }</span>
+<span class="ln"> </span>
+<span class="ln">    struct request req = { .pid = getpid() };</span>
+<span class="ln">    snprintf(req.text, sizeof req.text, &quot;%s&quot;, argv[1]);</span>
+<span class="ln">    int quit = !strcmp(req.text, &quot;quit&quot;);       /* quit에는 응답이 없다 */</span>
+<span class="ln"> </span>
+<span class="ln">    /* ① 응답 큐를 먼저 만든다 — 요청을 보낸 뒤에 만들면 늦을 수 있다 */</span>
+<span class="ln">    char name[32];</span>
+<span class="ln">    reply_name(name, sizeof name, req.pid);</span>
+<span class="ln">    struct mq_attr attr = { .mq_maxmsg = 1,</span>
+<span class="ln">                            .mq_msgsize = sizeof(struct reply) };</span>
+<span class="ln">    mqd_t repq = mq_open(name, O_CREAT | O_EXCL | O_RDONLY, 0622, &amp;attr);</span>
+<span class="ln">    if (repq == (mqd_t)-1) { perror(&quot;mq_open(응답 큐)&quot;); return 1; }</span>
+<span class="ln"> </span>
+<span class="ln">    /* ② 서버의 요청 큐를 이름으로 찾아 요청을 넣는다 */</span>
+<span class="ln">    int rc = 1;</span>
+<span class="ln">    mqd_t reqq = mq_open(REQ_QUEUE, O_WRONLY);</span>
+<span class="ln">    if (reqq == (mqd_t)-1) {</span>
+<span class="ln">        perror(&quot;서버가 없다: mq_open(&quot; REQ_QUEUE &quot;)&quot;);</span>
+<span class="ln">        goto out;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (mq_send(reqq, (char *)&amp;req, sizeof req, 0) == -1) {</span>
+<span class="ln">        perror(&quot;mq_send&quot;);</span>
+<span class="ln">        goto out;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (quit) { rc = 0; goto out; }</span>
+<span class="ln"> </span>
+<span class="ln">    /* ③ 내 응답 큐에서 기다린다. 서버가 죽었을 수 있으므로 3초까지만 */</span>
+<span class="ln">    struct timespec until;</span>
+<span class="ln">    clock_gettime(CLOCK_REALTIME, &amp;until);</span>
+<span class="ln">    until.tv_sec += 3;</span>
+<span class="ln">    struct reply rep;</span>
+<span class="ln">    if (mq_timedreceive(repq, (char *)&amp;rep, sizeof rep, NULL, &amp;until) == -1) {</span>
+<span class="ln">        perror(&quot;응답 없음: mq_timedreceive&quot;);</span>
+<span class="ln">        goto out;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;[클라이언트 %d] #%d %s → %s\n&quot;, (int)req.pid, rep.seq, req.text,</span>
+<span class="ln">           rep.text);</span>
+<span class="ln">    rc = 0;</span>
+<span class="ln"> </span>
+<span class="ln">out:</span>
+<span class="ln">    if (reqq != (mqd_t)-1) mq_close(reqq);</span>
+<span class="ln">    mq_close(repq);</span>
+<span class="ln">    mq_unlink(name);                    /* 내 응답 큐는 내가 지운다 */</span>
+<span class="ln">    return rc;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+    <details class="source">
+      <summary>proto.h <span class="muted">27줄</span></summary>
+      <pre class="code"><code><span class="ln">/* proto.h — mqserver와 mqclient가 함께 쓰는 약속(프로토콜) */</span>
+<span class="ln">#ifndef PROTO_H</span>
+<span class="ln">#define PROTO_H</span>
+<span class="ln"> </span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;sys/types.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">#define REQ_QUEUE &quot;/w13_req&quot;            /* 서버의 요청 큐: 모두가 아는 이름 */</span>
+<span class="ln">#define TEXT_MAX  64</span>
+<span class="ln"> </span>
+<span class="ln">struct request {                        /* 클라이언트 → 서버 */</span>
+<span class="ln">    pid_t pid;                          /* 응답을 돌려받을 곳 */</span>
+<span class="ln">    char  text[TEXT_MAX];</span>
+<span class="ln">};</span>
+<span class="ln"> </span>
+<span class="ln">struct reply {                          /* 서버 → 클라이언트 */</span>
+<span class="ln">    int  seq;                           /* 서버가 처리한 순번 */</span>
+<span class="ln">    char text[TEXT_MAX];</span>
+<span class="ln">};</span>
+<span class="ln"> </span>
+<span class="ln">/* 응답 큐의 이름은 클라이언트마다 다르다: /w13_rep.PID */</span>
+<span class="ln">static inline void reply_name(char *buf, size_t size, pid_t pid)</span>
+<span class="ln">{</span>
+<span class="ln">    snprintf(buf, size, &quot;/w13_rep.%d&quot;, (int)pid);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">#endif</span></code></pre>
+    </details>
+  </section>
+  <nav class="pager">
+    <a href="mqserver.html">← mqserver</a>
+    <span></span>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

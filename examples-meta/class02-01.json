@@ -1,0 +1,22 @@
+{
+  "class": "class02-01",
+  "title": "첫 수업 실습: 실행하고 비교하기",
+  "summary": "파일·권한·프로세스를 셸 명령으로 관찰하고, 마지막에 Hello World C 프로그램을 직접 실행해 서비스 등록의 출발점을 확인한다.",
+  "examples": [
+    {
+      "name": "helloworld",
+      "source": "service/helloworld.c",
+      "summary": "printf로 한 줄을 출력하고 0을 반환하며 끝나는 가장 단순한 프로그램이다. 종료 상태와 표준 출력 리다이렉션(>, >>)을 관찰한다.",
+      "steps": [
+        { "cmd": "./service/helloworld; echo \"exit=$?\"", "note": "Hello, world!가 한 번 출력되고 종료 상태는 0이다." },
+        { "cmd": "./service/helloworld > hello.txt; ./service/helloworld >> hello.txt; cat hello.txt", "note": ">는 덮어쓰기, >>는 덧붙이기이므로 파일에 두 줄이 남는다." },
+        { "cmd": "wc -l hello.txt", "note": "줄 수가 2인지 확인한다." },
+        { "cmd": "strace -e trace=write ./service/helloworld", "note": "printf가 결국 write(1, ...) 시스템 콜 한 번으로 이어지는 것을 본다." },
+        { "cmd": "cat /proc/1/comm", "note": "PID 1이 systemd가 아니므로 이 VM에서는 서비스 등록 단계를 진행할 수 없다." }
+      ],
+      "manual": false,
+      "expect": "Hello, world!",
+      "notes": "이 VM에는 systemd, sudo, gcc가 없어 README의 컴파일·서비스 등록(systemctl, journalctl) 단계는 실행할 수 없고 직접 실행만 가능하다. 실습 1~6의 apt, python3 웹 서버, curl 등도 사용할 수 없다."
+    }
+  ]
+}

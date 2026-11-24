@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mapmode — 메모리 매핑 (mmap) · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class11-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">11주차 1차시</a><span class="sep">/</span><span>mapmode</span></nav>
+  <header>
+    <h1>mapmode</h1>
+    <p>매핑 플래그에 따라 수정이 어디까지 보이는지 확인합니다. private/shared는 첫 줄을 대문자로 바꾼 뒤 pread로 파일을 다시 읽고, anon은 fork 뒤 전역 변수와 익명 공유 매핑을 비교하며, race는 여러 자식이 공유 카운터를 잠금 없이 올립니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class11-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="printf 'hello mmap\nsecond line\n' &gt; p.txt; cp p.txt s.txt" title="터미널에서 실행" aria-label="실행: printf 'hello mmap\nsecond line\n' &gt; p.txt; cp p.txt s.txt">▶</button><code>printf 'hello mmap\nsecond line\n' &gt; p.txt; cp p.txt s.txt</code></div>
+          <p>같은 내용의 파일 두 개를 준비한다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./mapmode private p.txt; cat p.txt" title="터미널에서 실행" aria-label="실행: ./mapmode private p.txt; cat p.txt">▶</button><code>./mapmode private p.txt; cat p.txt</code></div>
+          <p>MAP_PRIVATE: 매핑에서는 HELLO MMAP이지만 파일(pread, cat)은 소문자 그대로다 (copy-on-write).</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./mapmode shared s.txt; cat s.txt" title="터미널에서 실행" aria-label="실행: ./mapmode shared s.txt; cat s.txt">▶</button><code>./mapmode shared s.txt; cat s.txt</code></div>
+          <p>MAP_SHARED: 매핑을 고친 것이 파일에도 반영되어 첫 줄이 HELLO MMAP으로 바뀐다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./mapmode anon" title="터미널에서 실행" aria-label="실행: ./mapmode anon">▶</button><code>./mapmode anon</code></div>
+          <p>자식이 고친 전역 변수는 부모에게 0으로 남고, 익명 공유 매핑의 값만 42로 보인다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./mapmode race 4 5000000" title="터미널에서 실행" aria-label="실행: ./mapmode race 4 5000000">▶</button><code>./mapmode race 4 5000000</code></div>
+          <p>자식 4개가 공유 카운터를 500만 번씩 올린다. expected와 actual을 비교하고 lost가 0이 아닌지 본다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="rm -f p.txt s.txt" title="터미널에서 실행" aria-label="실행: rm -f p.txt s.txt">▶</button><code>rm -f p.txt s.txt</code></div>
+          <p>실습 파일을 지운다.</p>
+        </li>
+      </ol>
+      <p class="callout">이 VM은 CPU가 1개라서 경쟁은 타이머 인터럽트로 프로세스가 '읽기-더하기-쓰기' 중간에 교체될 때만 생깁니다. 그래서 반복 횟수를 교안(100만)보다 큰 500만으로 잡았습니다. 그래도 lost 0이 나올 수 있으니 몇 번 반복하거나 횟수를 늘려 보세요.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>mapmode.c <span class="muted">120줄</span></summary>
+      <pre class="code"><code><span class="ln">/* mapmode.c — 매핑 플래그에 따라 수정이 어디까지 보이는지 확인한다.</span>
+<span class="ln"> * 사용법:</span>
+<span class="ln"> *   ./mapmode private FILE        MAP_PRIVATE 로 첫 줄을 대문자로 바꾼다</span>
+<span class="ln"> *   ./mapmode shared  FILE        MAP_SHARED  로 첫 줄을 대문자로 바꾼다</span>
+<span class="ln"> *   ./mapmode anon                익명 공유 매핑 vs 전역 변수 (fork 뒤)</span>
+<span class="ln"> *   ./mapmode race NPROC LOOPS    여러 자식이 공유 카운터를 동시에 증가</span>
+<span class="ln"> */</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;ctype.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;sys/mman.h&gt;</span>
+<span class="ln">#include &lt;sys/stat.h&gt;</span>
+<span class="ln">#include &lt;sys/wait.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">static void die(const char *msg) { perror(msg); exit(1); }</span>
+<span class="ln"> </span>
+<span class="ln">/* 파일 매핑(map_file)과 익명 공유 매핑(shared_int) — 두 가지 매핑 함수 */</span>
+<span class="ln">static char *map_file(const char *path, int flags, size_t *len, int *fdp)</span>
+<span class="ln">{</span>
+<span class="ln">    int fd = open(path, O_RDWR);</span>
+<span class="ln">    if (fd &lt; 0) die(path);</span>
+<span class="ln">    struct stat st;</span>
+<span class="ln">    if (fstat(fd, &amp;st) &lt; 0) die(&quot;fstat&quot;);</span>
+<span class="ln">    if (st.st_size == 0) { fprintf(stderr, &quot;%s: empty\n&quot;, path); exit(1); }</span>
+<span class="ln">    *len = (size_t)st.st_size;</span>
+<span class="ln">    char *p = mmap(NULL, *len, PROT_READ | PROT_WRITE, flags, fd, 0);</span>
+<span class="ln">    if (p == MAP_FAILED) die(&quot;mmap&quot;);</span>
+<span class="ln">    *fdp = fd;</span>
+<span class="ln">    return p;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int *shared_int(void)</span>
+<span class="ln">{</span>
+<span class="ln">    int *p = mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE,</span>
+<span class="ln">                  MAP_SHARED | MAP_ANONYMOUS, -1, 0);</span>
+<span class="ln">    if (p == MAP_FAILED) die(&quot;mmap&quot;);</span>
+<span class="ln">    return p;                                          /* 0 으로 초기화됨 */</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void print_line(const char *tag, const char *p, size_t len)</span>
+<span class="ln">{</span>
+<span class="ln">    size_t n = 0;</span>
+<span class="ln">    while (n &lt; len &amp;&amp; p[n] != '\n') n++;</span>
+<span class="ln">    printf(&quot;%-14s %.*s\n&quot;, tag, (int)n, p);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int file_mode(const char *path, int shared)</span>
+<span class="ln">{</span>
+<span class="ln">    size_t len; int fd;</span>
+<span class="ln">    char *p = map_file(path, shared ? MAP_SHARED : MAP_PRIVATE, &amp;len, &amp;fd);</span>
+<span class="ln"> </span>
+<span class="ln">    for (size_t i = 0; i &lt; len &amp;&amp; p[i] != '\n'; i++)   /* 첫 줄 대문자 */</span>
+<span class="ln">        p[i] = (char)toupper((unsigned char)p[i]);</span>
+<span class="ln">    print_line(&quot;mapping:&quot;, p, len);</span>
+<span class="ln"> </span>
+<span class="ln">    if (shared &amp;&amp; msync(p, len, MS_SYNC) &lt; 0) die(&quot;msync&quot;);</span>
+<span class="ln">    if (munmap(p, len) &lt; 0) die(&quot;munmap&quot;);</span>
+<span class="ln"> </span>
+<span class="ln">    char buf[256];                                     /* 파일을 다시 읽는다 */</span>
+<span class="ln">    ssize_t n = pread(fd, buf, sizeof buf, 0);</span>
+<span class="ln">    if (n &lt; 0) die(&quot;pread&quot;);</span>
+<span class="ln">    print_line(&quot;file (pread):&quot;, buf, (size_t)n);</span>
+<span class="ln">    close(fd);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int global_value = 0;                           /* 일반 전역 변수 */</span>
+<span class="ln"> </span>
+<span class="ln">static int anon_mode(void)</span>
+<span class="ln">{</span>
+<span class="ln">    int *shared = shared_int();</span>
+<span class="ln">    pid_t pid = fork();</span>
+<span class="ln">    if (pid &lt; 0) die(&quot;fork&quot;);</span>
+<span class="ln">    if (pid == 0) {                                    /* 자식 */</span>
+<span class="ln">        global_value = 42;</span>
+<span class="ln">        *shared = 42;</span>
+<span class="ln">        printf(&quot;child : global=%d shared=%d\n&quot;, global_value, *shared);</span>
+<span class="ln">        fflush(stdout);</span>
+<span class="ln">        _exit(0);</span>
+<span class="ln">    }</span>
+<span class="ln">    if (waitpid(pid, NULL, 0) &lt; 0) die(&quot;waitpid&quot;);</span>
+<span class="ln">    printf(&quot;parent: global=%d shared=%d\n&quot;, global_value, *shared);</span>
+<span class="ln">    munmap(shared, sizeof(int));</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int race_mode(int nproc, long loops)</span>
+<span class="ln">{</span>
+<span class="ln">    volatile int *counter = shared_int();</span>
+<span class="ln">    for (int i = 0; i &lt; nproc; i++) {</span>
+<span class="ln">        pid_t pid = fork();</span>
+<span class="ln">        if (pid &lt; 0) die(&quot;fork&quot;);</span>
+<span class="ln">        if (pid == 0) {</span>
+<span class="ln">            for (long j = 0; j &lt; loops; j++)</span>
+<span class="ln">                (*counter)++;                          /* 읽기-더하기-쓰기 */</span>
+<span class="ln">            _exit(0);</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    while (wait(NULL) &gt; 0)</span>
+<span class="ln">        ;</span>
+<span class="ln">    long expected = (long)nproc * loops;</span>
+<span class="ln">    printf(&quot;expected %ld  actual %d  lost %ld\n&quot;,</span>
+<span class="ln">           expected, *counter, expected - *counter);</span>
+<span class="ln">    munmap((void *)counter, sizeof(int));</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc == 3 &amp;&amp; strcmp(argv[1], &quot;private&quot;) == 0) return file_mode(argv[2], 0);</span>
+<span class="ln">    if (argc == 3 &amp;&amp; strcmp(argv[1], &quot;shared&quot;) == 0)  return file_mode(argv[2], 1);</span>
+<span class="ln">    if (argc == 2 &amp;&amp; strcmp(argv[1], &quot;anon&quot;) == 0)    return anon_mode();</span>
+<span class="ln">    if (argc == 4 &amp;&amp; strcmp(argv[1], &quot;race&quot;) == 0)</span>
+<span class="ln">        return race_mode(atoi(argv[2]), atol(argv[3]));</span>
+<span class="ln">    fprintf(stderr, &quot;usage: %s private|shared FILE | anon | race NPROC LOOPS\n&quot;, argv[0]);</span>
+<span class="ln">    return 2;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="mapcat.html">← mapcat</a>
+    <a href="countnl.html">countnl →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>block_pending — 시그널 심화: 블록·보류·sigsuspend·안전한 핸들러 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class09-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">9주차 2차시</a><span class="sep">/</span><span>block_pending</span></nav>
+  <header>
+    <h1>block_pending</h1>
+    <p>sigprocmask로 SIGINT를 블록한 동안 도착한 시그널이 보류(pending)되었다가 마스크를 푸는 순간 전달되는 것을 보여 주고, show 모드로 /proc의 SigPnd·ShdPnd·SigBlk를 이름으로 푼다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class09-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./block_pending hold 3 &amp; sleep 1; kill -INT $!; ./block_pending show $!; wait" title="터미널에서 실행" aria-label="실행: ./block_pending hold 3 &amp; sleep 1; kill -INT $!; ./block_pending show $!; wait">▶</button><code>./block_pending hold 3 &amp; sleep 1; kill -INT $!; ./block_pending show $!; wait</code></div>
+          <p>블록 중 보낸 SIGINT가 ShdPnd에 INT로 쌓이고(SigBlk도 INT), 3초 뒤 풀리면서 핸들러 실행: ints=1</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./block_pending hold 1" title="터미널에서 실행" aria-label="실행: ./block_pending hold 1">▶</button><code>./block_pending hold 1</code></div>
+          <p>시그널이 없으면 after unblock: ints=0</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./block_pending show self" title="터미널에서 실행" aria-label="실행: ./block_pending show self">▶</button><code>./block_pending show self</code></div>
+          <p>자기 자신의 보류·블록 마스크(모두 비어 있음)</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./block_pending hold 99; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./block_pending hold 99; echo &quot;exit=$?&quot;">▶</button><code>./block_pending hold 99; echo &quot;exit=$?&quot;</code></div>
+          <p>범위 밖 초는 usage, 종료 상태 2</p>
+        </li>
+      </ol>
+      <p class="callout">프로그램이 안내하는 ./sigmask_show는 class09-01의 도구라 이 폴더에는 없다. 같은 터미널에서 show 모드로 대신 관찰한다. 직접 해 보려면 ./block_pending hold 5 실행 중 Ctrl-C를 누른다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>block_pending.c <span class="muted">134줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;signal.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* 블록과 보류(block &amp; pending)입니다. 마스크에 넣어 둔 시그널은</span>
+<span class="ln">   도착해도 전달되지 않고 SigPnd(보류)에 쌓입니다.</span>
+<span class="ln">   hold [초]: SIGINT를 블록한 임계 영역을 유지합니다. 그 사이 눌린</span>
+<span class="ln">              Ctrl-C는 핸들러를 실행하지 못하고 보류되며, 풀리는</span>
+<span class="ln">              순간 즉시 전달됩니다. sigpending으로 자기 보고합니다.</span>
+<span class="ln">   show PID : /proc/PID/status의 SigPnd·ShdPnd·SigBlk를 시그널 이름으로</span>
+<span class="ln">              풉니다. 보류 줄은 둘이다: SigPnd는 스레드별, ShdPnd는</span>
+<span class="ln">              프로세스 공용이다. kill PID가 채우는 것은 ShdPnd다.</span>
+<span class="ln">              Linux 전용입니다(macOS에는 /proc가 없습니다). */</span>
+<span class="ln"> </span>
+<span class="ln">static const char *names[32] = {</span>
+<span class="ln">    &quot;?&quot;, &quot;HUP&quot;, &quot;INT&quot;, &quot;QUIT&quot;, &quot;ILL&quot;, &quot;TRAP&quot;, &quot;ABRT&quot;, &quot;BUS&quot;, &quot;FPE&quot;,</span>
+<span class="ln">    &quot;KILL&quot;, &quot;USR1&quot;, &quot;SEGV&quot;, &quot;USR2&quot;, &quot;PIPE&quot;, &quot;ALRM&quot;, &quot;TERM&quot;, &quot;STKFLT&quot;,</span>
+<span class="ln">    &quot;CHLD&quot;, &quot;CONT&quot;, &quot;STOP&quot;, &quot;TSTP&quot;, &quot;TTIN&quot;, &quot;TTOU&quot;, &quot;URG&quot;, &quot;XCPU&quot;,</span>
+<span class="ln">    &quot;XFSZ&quot;, &quot;VTALRM&quot;, &quot;PROF&quot;, &quot;WINCH&quot;, &quot;IO&quot;, &quot;PWR&quot;, &quot;SYS&quot;};</span>
+<span class="ln"> </span>
+<span class="ln">static volatile sig_atomic_t ints = 0;</span>
+<span class="ln"> </span>
+<span class="ln">static void on_int(int sig)</span>
+<span class="ln">{</span>
+<span class="ln">    static const char msg[] = &quot;  [handler] SIGINT delivered\n&quot;;</span>
+<span class="ln">    (void)sig;</span>
+<span class="ln">    ssize_t r = write(STDOUT_FILENO, msg, sizeof msg - 1);</span>
+<span class="ln">    (void)r;                    /* 핸들러 안에서는 printf 대신 write */</span>
+<span class="ln">    ints++;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void decode(const char *line)</span>
+<span class="ln">{</span>
+<span class="ln">    char label[16];</span>
+<span class="ln">    unsigned long long mask;</span>
+<span class="ln">    if (sscanf(line, &quot;%15[^:]: %llx&quot;, label, &amp;mask) != 2)</span>
+<span class="ln">        return;</span>
+<span class="ln">    printf(&quot;%-6s %016llx &quot;, label, mask);</span>
+<span class="ln">    if (mask == 0)</span>
+<span class="ln">        printf(&quot; -&quot;);</span>
+<span class="ln">    for (int sig = 1; sig &lt;= 31; sig++)</span>
+<span class="ln">        if (mask &amp; (1ULL &lt;&lt; (sig - 1)))</span>
+<span class="ln">            printf(&quot; %s&quot;, names[sig]);</span>
+<span class="ln">    printf(&quot;\n&quot;);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int do_hold(long sec)</span>
+<span class="ln">{</span>
+<span class="ln">    struct sigaction sa;</span>
+<span class="ln">    sigset_t block, old, pend;</span>
+<span class="ln">    memset(&amp;sa, 0, sizeof sa);</span>
+<span class="ln">    sa.sa_handler = on_int;</span>
+<span class="ln">    sigemptyset(&amp;sa.sa_mask);</span>
+<span class="ln">    if (sigaction(SIGINT, &amp;sa, NULL) == -1) {</span>
+<span class="ln">        perror(&quot;sigaction&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    sigemptyset(&amp;block);</span>
+<span class="ln">    sigaddset(&amp;block, SIGINT);</span>
+<span class="ln">    if (sigprocmask(SIG_BLOCK, &amp;block, &amp;old) == -1) {</span>
+<span class="ln">        perror(&quot;sigprocmask&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;pid=%ld SIGINT blocked for %lds: press Ctrl-C now\n&quot;,</span>
+<span class="ln">           (long)getpid(), sec);</span>
+<span class="ln">    printf(&quot;observe: ./block_pending show %ld  (another terminal, Linux)\n&quot;,</span>
+<span class="ln">           (long)getpid());</span>
+<span class="ln">    printf(&quot;observe: ./sigmask_show %ld           (first-session tool)\n&quot;,</span>
+<span class="ln">           (long)getpid());</span>
+<span class="ln">    fflush(stdout);</span>
+<span class="ln">    int reported = 0;</span>
+<span class="ln">    for (long i = 0; i &lt; sec; i++) {</span>
+<span class="ln">        sleep(1);</span>
+<span class="ln">        if (sigpending(&amp;pend) == -1) {</span>
+<span class="ln">            perror(&quot;sigpending&quot;);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">        if (sigismember(&amp;pend, SIGINT) &amp;&amp; !reported) {</span>
+<span class="ln">            reported = 1;</span>
+<span class="ln">            printf(&quot;  pending: Ctrl-C arrived, handler is NOT running\n&quot;);</span>
+<span class="ln">            fflush(stdout);</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;hold over: unblocking (a pending SIGINT is delivered now)\n&quot;);</span>
+<span class="ln">    fflush(stdout);</span>
+<span class="ln">    if (sigprocmask(SIG_SETMASK, &amp;old, NULL) == -1) {</span>
+<span class="ln">        perror(&quot;sigprocmask&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;after unblock: ints=%d\n&quot;, (int)ints);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int do_show(const char *pid)</span>
+<span class="ln">{</span>
+<span class="ln">    if (access(&quot;/proc/self/status&quot;, F_OK) == -1) {</span>
+<span class="ln">        printf(&quot;show=unsupported: no /proc on this OS (Linux only)\n&quot;);</span>
+<span class="ln">        return 0;</span>
+<span class="ln">    }</span>
+<span class="ln">    char path[64];</span>
+<span class="ln">    snprintf(path, sizeof path, &quot;/proc/%s/status&quot;, pid);</span>
+<span class="ln">    FILE *fp = fopen(path, &quot;r&quot;);</span>
+<span class="ln">    if (fp == NULL) {</span>
+<span class="ln">        perror(path);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    char line[256];</span>
+<span class="ln">    while (fgets(line, sizeof line, fp) != NULL)</span>
+<span class="ln">        if (strncmp(line, &quot;SigPnd:&quot;, 7) == 0</span>
+<span class="ln">            || strncmp(line, &quot;ShdPnd:&quot;, 7) == 0</span>
+<span class="ln">            || strncmp(line, &quot;SigBlk:&quot;, 7) == 0)</span>
+<span class="ln">            decode(line);</span>
+<span class="ln">    fclose(fp);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc &gt;= 2 &amp;&amp; strcmp(argv[1], &quot;hold&quot;) == 0) {</span>
+<span class="ln">        long sec = argc == 3 ? strtol(argv[2], NULL, 10) : 10;</span>
+<span class="ln">        if (argc &gt; 3 || sec &lt; 1 || sec &gt; 60) {</span>
+<span class="ln">            fprintf(stderr, &quot;usage: %s hold [seconds 1-60]\n&quot;, argv[0]);</span>
+<span class="ln">            return 2;</span>
+<span class="ln">        }</span>
+<span class="ln">        return do_hold(sec);</span>
+<span class="ln">    }</span>
+<span class="ln">    if (argc == 3 &amp;&amp; strcmp(argv[1], &quot;show&quot;) == 0)</span>
+<span class="ln">        return do_show(argv[2]);</span>
+<span class="ln">    fprintf(stderr, &quot;usage: %s hold [seconds 1-60] | show PID\n&quot;, argv[0]);</span>
+<span class="ln">    return 2;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="signal_self.html">← signal_self</a>
+    <a href="suspend_demo.html">suspend_demo →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

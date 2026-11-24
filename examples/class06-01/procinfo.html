@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>procinfo — 프로세스 정체성·인자·환경 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class06-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">6주차 1차시</a><span class="sep">/</span><span>procinfo</span></nav>
+  <header>
+    <h1>procinfo</h1>
+    <p>정체성(pid·ppid·pgid·sid·tty), 자격 증명(uid·euid·gid·egid), 작업 디렉토리, 인자, 환경 요약을 한 번에 출력하는 종합 보고서입니다. --argv, --env로 전체 목록을 볼 수 있습니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class06-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./procinfo one --argv" title="터미널에서 실행" aria-label="실행: ./procinfo one --argv">▶</button><code>./procinfo one --argv</code></div>
+          <p>argc=3과 argv 목록, env_count, HOME·PATH 값을 확인합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="id" title="터미널에서 실행" aria-label="실행: id">▶</button><code>id</code></div>
+          <p>uid·gid 숫자가 procinfo의 uid/euid, gid/egid와 같은지 맞춥니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="(cd /tmp &amp;&amp; &quot;$OLDPWD/procinfo&quot; | grep cwd); pwd" title="터미널에서 실행" aria-label="실행: (cd /tmp &amp;&amp; &quot;$OLDPWD/procinfo&quot; | grep cwd); pwd">▶</button><code>(cd /tmp &amp;&amp; &quot;$OLDPWD/procinfo&quot; | grep cwd); pwd</code></div>
+          <p>서브셸에서만 cwd=/tmp입니다. 바깥 셸의 pwd는 그대로입니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="env -i ./procinfo --env" title="터미널에서 실행" aria-label="실행: env -i ./procinfo --env">▶</button><code>env -i ./procinfo --env</code></div>
+          <p>빈 환경에서는 env_count=0이고 HOME·PATH가 (unset)입니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="grep -E '^(Name|Pid|PPid|Uid|Gid)' /proc/$$/status" title="터미널에서 실행" aria-label="실행: grep -E '^(Name|Pid|PPid|Uid|Gid)' /proc/$$/status">▶</button><code>grep -E '^(Name|Pid|PPid|Uid|Gid)' /proc/$$/status</code></div>
+          <p>셸의 Pid가 procinfo의 ppid와, Uid·Gid가 uid·gid와 같은지 확인합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./procinfo --bogus; echo &quot;status=$?&quot;" title="터미널에서 실행" aria-label="실행: ./procinfo --bogus; echo &quot;status=$?&quot;">▶</button><code>./procinfo --bogus; echo &quot;status=$?&quot;</code></div>
+          <p>알 수 없는 -- 옵션은 usage와 종료 상태 2입니다.</p>
+        </li>
+      </ol>
+      <p class="callout">root가 아닌 student(uid 1000)로 실행하므로 uid=1000 euid=1000이 나옵니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>procinfo.c <span class="muted">88줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;sys/types.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* 오늘 배운 실행 문맥을 한 프로그램으로 종합한다.</span>
+<span class="ln">   정체성(pid·ppid·pgid·sid), 자격 증명(uid·euid·gid·egid),</span>
+<span class="ln">   작업 디렉터리, 인자, 환경 요약을 같은 규칙으로 출력한다.</span>
+<span class="ln">   --env를 주면 환경 전체를, --argv를 주면 인자 전체를 나열한다. */</span>
+<span class="ln">extern char **environ;</span>
+<span class="ln"> </span>
+<span class="ln">static int count_env(void)</span>
+<span class="ln">{</span>
+<span class="ln">    int n = 0;</span>
+<span class="ln">    for (char **e = environ; *e != NULL; e++) {</span>
+<span class="ln">        n++;</span>
+<span class="ln">    }</span>
+<span class="ln">    return n;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void show_env_var(const char *name)</span>
+<span class="ln">{</span>
+<span class="ln">    const char *value = getenv(name);</span>
+<span class="ln">    if (value == NULL) {</span>
+<span class="ln">        printf(&quot;%s=(unset)\n&quot;, name);</span>
+<span class="ln">    } else {</span>
+<span class="ln">        printf(&quot;%s=%s\n&quot;, name, value);</span>
+<span class="ln">    }</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    int show_env = 0;</span>
+<span class="ln">    int show_argv = 0;</span>
+<span class="ln">    for (int i = 1; i &lt; argc; i++) {</span>
+<span class="ln">        if (strcmp(argv[i], &quot;--env&quot;) == 0) {</span>
+<span class="ln">            show_env = 1;</span>
+<span class="ln">        } else if (strcmp(argv[i], &quot;--argv&quot;) == 0) {</span>
+<span class="ln">            show_argv = 1;</span>
+<span class="ln">        } else if (strncmp(argv[i], &quot;--&quot;, 2) == 0) {</span>
+<span class="ln">            fprintf(stderr, &quot;usage: %s [--env] [--argv]&quot;</span>
+<span class="ln">                            &quot; [args...]\n&quot;, argv[0]);</span>
+<span class="ln">            return 2;</span>
+<span class="ln">        }</span>
+<span class="ln">        /* --로 시작하지 않는 인자는 명령행 입력으로 그대로 두고</span>
+<span class="ln">           --argv로 관찰한다. argv는 검증 대상이지 거부 대상이 아니다. */</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;pid=%ld ppid=%ld\n&quot;,</span>
+<span class="ln">           (long)getpid(), (long)getppid());</span>
+<span class="ln">    printf(&quot;pgid=%ld sid=%ld\n&quot;,</span>
+<span class="ln">           (long)getpgrp(), (long)getsid(0));</span>
+<span class="ln">    const char *tty = ttyname(STDIN_FILENO);</span>
+<span class="ln">    if (tty != NULL) {</span>
+<span class="ln">        printf(&quot;tty=%s\n&quot;, tty);</span>
+<span class="ln">    } else {</span>
+<span class="ln">        printf(&quot;tty=(none)\n&quot;);</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;uid=%ld euid=%ld\n&quot;,</span>
+<span class="ln">           (long)getuid(), (long)geteuid());</span>
+<span class="ln">    printf(&quot;gid=%ld egid=%ld\n&quot;,</span>
+<span class="ln">           (long)getgid(), (long)getegid());</span>
+<span class="ln">    char cwd[4096];</span>
+<span class="ln">    if (getcwd(cwd, sizeof cwd) == NULL) {</span>
+<span class="ln">        perror(&quot;getcwd&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;cwd=%s\n&quot;, cwd);</span>
+<span class="ln">    printf(&quot;argc=%d\n&quot;, argc);</span>
+<span class="ln">    if (show_argv) {</span>
+<span class="ln">        for (int i = 0; i &lt; argc; i++) {</span>
+<span class="ln">            printf(&quot;argv[%d]=%s\n&quot;, i, argv[i]);</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;env_count=%d\n&quot;, count_env());</span>
+<span class="ln">    if (show_env) {</span>
+<span class="ln">        for (char **e = environ; *e != NULL; e++) {</span>
+<span class="ln">            printf(&quot;%s\n&quot;, *e);</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    show_env_var(&quot;HOME&quot;);</span>
+<span class="ln">    show_env_var(&quot;PATH&quot;);</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="cwd_probe.html">← cwd_probe</a>
+    <span></span>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

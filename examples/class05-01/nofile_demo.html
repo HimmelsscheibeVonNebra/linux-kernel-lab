@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nofile_demo — 시스템 정보와 자원 한계 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class05-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">5주차 1차시</a><span class="sep">/</span><span>nofile_demo</span></nav>
+  <header>
+    <h1>nofile_demo</h1>
+    <p>/dev/null을 EMFILE이 날 때까지 반복해서 열어 FD 한계를 실험합니다. --raise N을 주면 setrlimit(2)로 soft 한계를 N(hard 이하)으로 바꾼 뒤 측정합니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class05-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./nofile_demo" title="터미널에서 실행" aria-label="실행: ./nofile_demo">▶</button><code>./nofile_demo</code></div>
+          <p>opened는 soft 한계보다 3 정도 작습니다(표준 입출력 FD 0~2가 이미 열려 있음). stopped=EMFILE을 확인합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./nofile_demo --raise 64" title="터미널에서 실행" aria-label="실행: ./nofile_demo --raise 64">▶</button><code>./nofile_demo --raise 64</code></div>
+          <p>soft를 64로 낮춘 뒤(after soft=64) opened가 61 근처에서 멈춥니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./nofile_demo --raise 4096" title="터미널에서 실행" aria-label="실행: ./nofile_demo --raise 4096">▶</button><code>./nofile_demo --raise 4096</code></div>
+          <p>hard 이하이면 상향되고, hard보다 큰 값은 프로그램이 hard로 줄여서 설정합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="(ulimit -Sn 32 &amp;&amp; ./nofile_demo)" title="터미널에서 실행" aria-label="실행: (ulimit -Sn 32 &amp;&amp; ./nofile_demo)">▶</button><code>(ulimit -Sn 32 &amp;&amp; ./nofile_demo)</code></div>
+          <p>서브셸에서 soft를 32로 낮추면 자식 프로세스가 그 한계를 물려받습니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="ulimit -Sn" title="터미널에서 실행" aria-label="실행: ulimit -Sn">▶</button><code>ulimit -Sn</code></div>
+          <p>서브셸 밖의 셸 한계는 그대로입니다.</p>
+        </li>
+      </ol>
+      <p class="callout">root가 아니므로 hard 한계를 넘는 상향은 불가능합니다. README의 bash -c 예시는 bash가 없어 ash 서브셸 ( ... )로 대체했습니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>nofile_demo.c <span class="muted">106줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;inttypes.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;sys/resource.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">static void print_limit(const char *label)</span>
+<span class="ln">{</span>
+<span class="ln">    struct rlimit rl;</span>
+<span class="ln">    if (getrlimit(RLIMIT_NOFILE, &amp;rl) == -1) {</span>
+<span class="ln">        perror(&quot;getrlimit&quot;);</span>
+<span class="ln">        exit(1);</span>
+<span class="ln">    }</span>
+<span class="ln">    if (rl.rlim_cur == RLIM_INFINITY)</span>
+<span class="ln">        printf(&quot;%s soft=unlimited&quot;, label);</span>
+<span class="ln">    else</span>
+<span class="ln">        printf(&quot;%s soft=%ju&quot;, label, (uintmax_t)rl.rlim_cur);</span>
+<span class="ln">    if (rl.rlim_max == RLIM_INFINITY)</span>
+<span class="ln">        printf(&quot; hard=unlimited\n&quot;);</span>
+<span class="ln">    else</span>
+<span class="ln">        printf(&quot; hard=%ju\n&quot;, (uintmax_t)rl.rlim_max);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    int raise_requested = argc == 3 &amp;&amp; strcmp(argv[1], &quot;--raise&quot;) == 0;</span>
+<span class="ln">    if (!(argc == 1 || raise_requested)) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s [--raise N]\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    print_limit(&quot;before&quot;);</span>
+<span class="ln"> </span>
+<span class="ln">    if (raise_requested) {</span>
+<span class="ln">        char *end = NULL;</span>
+<span class="ln">        errno = 0;</span>
+<span class="ln">        unsigned long long want = strtoull(argv[2], &amp;end, 10);</span>
+<span class="ln">        if (end == argv[2] || *end != '\0' || errno != 0) {</span>
+<span class="ln">            fprintf(stderr, &quot;invalid number: %s\n&quot;, argv[2]);</span>
+<span class="ln">            return 2;</span>
+<span class="ln">        }</span>
+<span class="ln">        struct rlimit rl;</span>
+<span class="ln">        if (getrlimit(RLIMIT_NOFILE, &amp;rl) == -1) {</span>
+<span class="ln">            perror(&quot;getrlimit&quot;);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">        /* 일반 사용자는 hard까지 상향할 수 있다. */</span>
+<span class="ln">        rlim_t target = (rlim_t)want;</span>
+<span class="ln">        if (rl.rlim_max != RLIM_INFINITY &amp;&amp; target &gt; rl.rlim_max)</span>
+<span class="ln">            target = rl.rlim_max;</span>
+<span class="ln">        struct rlimit next = { target, rl.rlim_max };</span>
+<span class="ln">        if (setrlimit(RLIMIT_NOFILE, &amp;next) == -1) {</span>
+<span class="ln">            perror(&quot;setrlimit&quot;);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">        print_limit(&quot;after &quot;);</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    struct rlimit rl;</span>
+<span class="ln">    if (getrlimit(RLIMIT_NOFILE, &amp;rl) == -1) {</span>
+<span class="ln">        perror(&quot;getrlimit&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    rlim_t cap = rl.rlim_cur == RLIM_INFINITY ? 65536 : rl.rlim_cur;</span>
+<span class="ln">    int *fds = malloc(sizeof *fds * (size_t)cap);</span>
+<span class="ln">    if (fds == NULL) {</span>
+<span class="ln">        perror(&quot;malloc&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    int opened = 0;</span>
+<span class="ln">    while (opened &lt; (int)cap) {</span>
+<span class="ln">        int fd = open(&quot;/dev/null&quot;, O_RDONLY);</span>
+<span class="ln">        if (fd == -1) {</span>
+<span class="ln">            if (errno == EMFILE)</span>
+<span class="ln">                break;</span>
+<span class="ln">            perror(&quot;open&quot;);</span>
+<span class="ln">            while (opened &gt; 0)</span>
+<span class="ln">                close(fds[--opened]);</span>
+<span class="ln">            free(fds);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">        fds[opened++] = fd;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;opened=%d stopped=&quot;, opened);</span>
+<span class="ln">    if (opened == (int)cap)</span>
+<span class="ln">        printf(&quot;cap\n&quot;);</span>
+<span class="ln">    else</span>
+<span class="ln">        printf(&quot;EMFILE\n&quot;);</span>
+<span class="ln">    int close_failed = 0;</span>
+<span class="ln">    while (opened &gt; 0)</span>
+<span class="ln">        if (close(fds[--opened]) == -1)</span>
+<span class="ln">            close_failed = 1;</span>
+<span class="ln">    free(fds);</span>
+<span class="ln">    if (close_failed) {</span>
+<span class="ln">        perror(&quot;close&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;closed all descriptors\n&quot;);</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="limit_show.html">← limit_show</a>
+    <a href="proc_probe.html">proc_probe →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pipe_two — 양방향 파이프 · 파이프라인 · FIFO 서버 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class12-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">12주차 2차시</a><span class="sep">/</span><span>pipe_two</span></nav>
+  <header>
+    <h1>pipe_two</h1>
+    <p>방향마다 파이프를 하나씩(req, rep) 만들어 부모가 ping을 보내고 자식이 pong으로 답합니다. 각자 쓰지 않는 끝점을 닫는 규칙을 보여 줍니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class12-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pipe_two" title="터미널에서 실행" aria-label="실행: ./pipe_two">▶</button><code>./pipe_two</code></div>
+          <p>req = 3,4  rep = 5,6 으로 끝점 넷이 만들어지고, 자식이 질문 5바이트(ping)를 받고 부모가 답 5바이트(pong)를 받는다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="strace -f -e trace=pipe,pipe2,read,write ./pipe_two 2&gt;&amp;1 | tail -15" title="터미널에서 실행" aria-label="실행: strace -f -e trace=pipe,pipe2,read,write ./pipe_two 2&gt;&amp;1 | tail -15">▶</button><code>strace -f -e trace=pipe,pipe2,read,write ./pipe_two 2&gt;&amp;1 | tail -15</code></div>
+          <p>부모의 write(4, &quot;ping\n&quot;) → 자식의 read(3) → 자식의 write(6, &quot;pong\n&quot;) → 부모의 read(5) 순서를 프로세스(pid)별로 확인한다.</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>pipe_two.c <span class="muted">45줄</span></summary>
+      <pre class="code"><code><span class="ln">/* pipe_two.c — 파이프 두 개로 한 번 묻고 한 번 답을 받는다. */</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;sys/wait.h&gt;               /* waitpid */</span>
+<span class="ln">#include &lt;unistd.h&gt;                 /* pipe, fork, read, write, close */</span>
+<span class="ln"> </span>
+<span class="ln">int main(void)</span>
+<span class="ln">{</span>
+<span class="ln">    int req[2], rep[2];             /* req: 부모 → 자식, rep: 자식 → 부모 */</span>
+<span class="ln">    char buf[64];                   /* NUL로 끝나지 않는다: 길이 n과 함께 쓴다 */</span>
+<span class="ln">    ssize_t n;                      /* read의 반환값 */</span>
+<span class="ln"> </span>
+<span class="ln">    if (pipe(req) == -1 || pipe(rep) == -1) {   /* 방향마다 파이프 하나 */</span>
+<span class="ln">        perror(&quot;pipe&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;req = %d,%d  rep = %d,%d\n&quot;, req[0], req[1], rep[0], rep[1]);</span>
+<span class="ln">    fflush(stdout);                 /* fork 전에 stdio 버퍼를 비운다 (4주차) */</span>
+<span class="ln"> </span>
+<span class="ln">    pid_t pid = fork();             /* 끝점 넷이 복사되어 여덟 개가 된다 */</span>
+<span class="ln">    if (pid == -1) {</span>
+<span class="ln">        perror(&quot;fork&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (pid == 0) {                 /* 자식: req에서 읽고 rep에 쓴다 */</span>
+<span class="ln">        close(req[1]);              /* 자식은 req에 쓰지 않는다 */</span>
+<span class="ln">        close(rep[0]);              /* 자식은 rep에서 읽지 않는다 */</span>
+<span class="ln">        n = read(req[0], buf, sizeof buf);      /* 질문이 올 때까지 잠든다 */</span>
+<span class="ln">        printf(&quot;[자식] 질문 %zd바이트: %.*s&quot;, n, (int)n, buf);</span>
+<span class="ln">        fflush(stdout);</span>
+<span class="ln">        if (write(rep[1], &quot;pong\n&quot;, 5) == -1)   /* 반대 방향 파이프로 답한다 */</span>
+<span class="ln">            perror(&quot;write&quot;);</span>
+<span class="ln">        _exit(0);                   /* 남은 끝점 둘은 종료하면서 닫힌다 */</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    close(req[0]);                  /* 부모는 req에서 읽지 않는다 */</span>
+<span class="ln">    close(rep[1]);                  /* 부모는 rep에 쓰지 않는다 */</span>
+<span class="ln">    if (write(req[1], &quot;ping\n&quot;, 5) == -1)       /* 먼저 묻는다 */</span>
+<span class="ln">        perror(&quot;write&quot;);</span>
+<span class="ln">    n = read(rep[0], buf, sizeof buf);          /* 그다음에 답을 기다린다 */</span>
+<span class="ln">    printf(&quot;[부모] 답 %zd바이트: %.*s&quot;, n, (int)n, buf);</span>
+<span class="ln">    close(req[1]);</span>
+<span class="ln">    close(rep[0]);</span>
+<span class="ln">    waitpid(pid, NULL, 0);          /* 자식을 거둔다 (10주차) */</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <span></span>
+    <a href="pipetalk.html">pipetalk →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

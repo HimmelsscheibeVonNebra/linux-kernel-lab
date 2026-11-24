@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dir_remove — 리눅스 파일과 디렉토리 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class04-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">4주차 1차시</a><span class="sep">/</span><span>dir_remove</span></nav>
+  <header>
+    <h1>dir_remove</h1>
+    <p>rmdir(2)로 빈 디렉토리를 삭제합니다. 내용이 있는 디렉토리는 ENOTEMPTY로 실패하며 재귀 삭제는 하지 않습니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class04-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="rm -rf rmdir_lab &amp;&amp; mkdir rmdir_lab &amp;&amp; printf 'keep me\n' &gt; rmdir_lab/keep.txt" title="터미널에서 실행" aria-label="실행: rm -rf rmdir_lab &amp;&amp; mkdir rmdir_lab &amp;&amp; printf 'keep me\n' &gt; rmdir_lab/keep.txt">▶</button><code>rm -rf rmdir_lab &amp;&amp; mkdir rmdir_lab &amp;&amp; printf 'keep me\n' &gt; rmdir_lab/keep.txt</code></div>
+          <p>파일이 하나 들어 있는 디렉토리를 준비합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./dir_remove rmdir_lab; echo &quot;status=$?&quot;" title="터미널에서 실행" aria-label="실행: ./dir_remove rmdir_lab; echo &quot;status=$?&quot;">▶</button><code>./dir_remove rmdir_lab; echo &quot;status=$?&quot;</code></div>
+          <p>비어 있지 않으므로 'Directory not empty'로 실패합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="cat rmdir_lab/keep.txt" title="터미널에서 실행" aria-label="실행: cat rmdir_lab/keep.txt">▶</button><code>cat rmdir_lab/keep.txt</code></div>
+          <p>실패한 뒤에도 안의 파일은 그대로 남아 있습니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="rm rmdir_lab/keep.txt &amp;&amp; ./dir_remove rmdir_lab" title="터미널에서 실행" aria-label="실행: rm rmdir_lab/keep.txt &amp;&amp; ./dir_remove rmdir_lab">▶</button><code>rm rmdir_lab/keep.txt &amp;&amp; ./dir_remove rmdir_lab</code></div>
+          <p>비운 뒤에는 'removed: rmdir_lab'가 출력됩니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./dir_remove rmdir_lab; echo &quot;status=$?&quot;" title="터미널에서 실행" aria-label="실행: ./dir_remove rmdir_lab; echo &quot;status=$?&quot;">▶</button><code>./dir_remove rmdir_lab; echo &quot;status=$?&quot;</code></div>
+          <p>이미 지워진 이름은 ENOENT로 실패합니다.</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>dir_remove.c <span class="muted">23줄</span></summary>
+      <pre class="code"><code><span class="ln">#define _POSIX_C_SOURCE 200809L</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc != 2) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s DIRECTORY\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    /* 빈 디렉토리만 삭제한다. 내부 파일을 재귀적으로 지우지 않는다. */</span>
+<span class="ln">    if (rmdir(argv[1]) == -1) {</span>
+<span class="ln">        perror(argv[1]);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    if (printf(&quot;removed: %s\n&quot;, argv[1]) &lt; 0 || fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="dir_chdir.html">← dir_chdir</a>
+    <span></span>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

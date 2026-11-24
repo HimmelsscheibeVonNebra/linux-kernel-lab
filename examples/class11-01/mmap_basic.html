@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mmap_basic — 메모리 매핑 (mmap) · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class11-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">11주차 1차시</a><span class="sep">/</span><span>mmap_basic</span></nav>
+  <header>
+    <h1>mmap_basic</h1>
+    <p>파일 없이 정수 하나 크기의 익명 매핑(MAP_PRIVATE | MAP_ANONYMOUS)을 만들고 42를 쓰고 읽은 뒤 munmap으로 해제하는 입문 예제입니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class11-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./mmap_basic" title="터미널에서 실행" aria-label="실행: ./mmap_basic">▶</button><code>./mmap_basic</code></div>
+          <p>*p = 42 가 출력된다. mmap이 돌려준 주소를 일반 포인터처럼 쓴다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="strace -e trace=mmap,mmap2,munmap ./mmap_basic 2&gt;&amp;1 | tail -5" title="터미널에서 실행" aria-label="실행: strace -e trace=mmap,mmap2,munmap ./mmap_basic 2&gt;&amp;1 | tail -5">▶</button><code>strace -e trace=mmap,mmap2,munmap ./mmap_basic 2&gt;&amp;1 | tail -5</code></div>
+          <p>마지막 쪽에서 길이 4의 MAP_PRIVATE|MAP_ANONYMOUS 매핑과 munmap 호출을 찾는다. 그 앞의 mmap2는 동적 로더가 라이브러리를 올리는 호출이다.</p>
+        </li>
+      </ol>
+      <p class="callout">32비트(i686)에서는 mmap()이 mmap2 시스템 콜로 나갑니다. 4바이트를 요청해도 실제 매핑은 페이지(4096바이트) 단위입니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>mmap_basic.c <span class="muted">29줄</span></summary>
+      <pre class="code"><code><span class="ln">/* mmap_basic.c: 파일 없이 정수 하나를 매핑해 쓰고 읽는 입문 예제 */</span>
+<span class="ln">#define _GNU_SOURCE             /* Linux에서 MAP_ANONYMOUS 선언 사용 */</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;sys/mman.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">int main(void)</span>
+<span class="ln">{</span>
+<span class="ln">    size_t len = sizeof(int);    /* 요청 길이. 실제 매핑은 페이지 단위 */</span>
+<span class="ln"> </span>
+<span class="ln">    int *p = mmap(NULL, len,     /* 주소는 커널이 선택, 길이는 바이트 */</span>
+<span class="ln">                  PROT_READ | PROT_WRITE,   /* 읽기와 쓰기 허용 */</span>
+<span class="ln">                  MAP_PRIVATE | MAP_ANONYMOUS, /* 비공개, 파일 없음 */</span>
+<span class="ln">                  -1, 0);       /* 익명 매핑: fd는 -1, offset은 0 */</span>
+<span class="ln"> </span>
+<span class="ln">    if (p == MAP_FAILED) {       /* 실패는 NULL이 아니라 MAP_FAILED */</span>
+<span class="ln">        perror(&quot;mmap&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    /* 익명 매핑은 0으로 시작한다. 일반 포인터처럼 값을 쓴다. */</span>
+<span class="ln">    *p = 42;</span>
+<span class="ln">    printf(&quot;*p = %d\n&quot;, *p);     /* 같은 주소에서 값을 읽는다. */</span>
+<span class="ln"> </span>
+<span class="ln">    if (munmap(p, len) == -1) {  /* 매핑 해제. 이후 p로 접근하지 않는다. */</span>
+<span class="ln">        perror(&quot;munmap&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <span></span>
+    <a href="mapcat.html">mapcat →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

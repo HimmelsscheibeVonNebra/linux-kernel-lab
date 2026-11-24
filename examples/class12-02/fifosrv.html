@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>fifosrv — 양방향 파이프 · 파이프라인 · FIFO 서버 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class12-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">12주차 2차시</a><span class="sep">/</span><span>fifosrv</span></nav>
+  <header>
+    <h1>fifosrv</h1>
+    <p>FIFO 하나로 여러 클라이언트의 요청을 받는 덧셈 서버입니다. 요청(고정 길이 구조체)은 모두 서버 FIFO로 오고, 답은 클라이언트가 PID를 붙여 만든 전용 FIFO로 돌려보냅니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class12-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./fifosrv serve calc &amp; sleep 1; ls -l calc" title="터미널에서 실행" aria-label="실행: ./fifosrv serve calc &amp; sleep 1; ls -l calc">▶</button><code>./fifosrv serve calc &amp; sleep 1; ls -l calc</code></div>
+          <p>서버가 FIFO calc를 만들고 첫 클라이언트를 기다린다 (ls -l 맨 앞 글자가 p).</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./fifosrv ask calc 3 4" title="터미널에서 실행" aria-label="실행: ./fifosrv ask calc 3 4">▶</button><code>./fifosrv ask calc 3 4</code></div>
+          <p>클라이언트가 calc.PID 응답 FIFO를 만들고 요청을 보낸 뒤 답 7을 받는다. 서버 쪽 기록도 함께 출력된다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./fifosrv ask calc 10 -25" title="터미널에서 실행" aria-label="실행: ./fifosrv ask calc 10 -25">▶</button><code>./fifosrv ask calc 10 -25</code></div>
+          <p>클라이언트가 떠난 뒤에도 서버는 계속 일한다 (서버가 쓰기 끝을 하나 쥐고 있어 EOF가 오지 않는다). 답은 -15.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./fifosrv burst calc 10" title="터미널에서 실행" aria-label="실행: ./fifosrv burst calc 10">▶</button><code>./fifosrv burst calc 10</code></div>
+          <p>자식 10개가 동시에 묻는다. 요청이 PIPE_BUF 이하라 섞이지 않고, 응답 FIFO가 클라이언트마다 달라 10개 모두 맞는 답을 받는다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="ls calc*" title="터미널에서 실행" aria-label="실행: ls calc*">▶</button><code>ls calc*</code></div>
+          <p>클라이언트의 응답 FIFO(calc.PID)는 모두 지워지고 서버 FIFO calc만 남아 있다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./fifosrv stop calc; wait" title="터미널에서 실행" aria-label="실행: ./fifosrv stop calc; wait">▶</button><code>./fifosrv stop calc; wait</code></div>
+          <p>pid가 0인 요청을 보내 서버를 끝낸다. 서버는 요청 12개를 처리했다고 보고하고 FIFO를 지운다.</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>fifosrv.c <span class="muted">160줄</span></summary>
+      <pre class="code"><code><span class="ln">/* fifosrv.c — FIFO 하나로 여러 클라이언트의 요청을 받는 덧셈 서버.</span>
+<span class="ln"> * 요청은 모두 서버 FIFO로 오고, 답은 클라이언트마다 따로 만든 FIFO로 간다.</span>
+<span class="ln"> * 사용법: ./fifosrv serve FIFO | ask FIFO A B | burst FIFO K | stop FIFO</span>
+<span class="ln"> */</span>
+<span class="ln">#include &lt;errno.h&gt;                  /* errno, EEXIST */</span>
+<span class="ln">#include &lt;fcntl.h&gt;                  /* open, O_RDONLY, O_WRONLY */</span>
+<span class="ln">#include &lt;signal.h&gt;                 /* signal, SIGPIPE, SIG_IGN */</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;sys/stat.h&gt;               /* mkfifo */</span>
+<span class="ln">#include &lt;sys/wait.h&gt;               /* wait, WEXITSTATUS */</span>
+<span class="ln">#include &lt;unistd.h&gt;                 /* read, write, close, unlink, getpid, fork */</span>
+<span class="ln"> </span>
+<span class="ln">struct request {                    /* 고정 길이 12바이트: write 한 번으로 보낸다 */</span>
+<span class="ln">    pid_t pid;                      /* 보낸 클라이언트. 0이면 &quot;서버 종료&quot; */</span>
+<span class="ln">    int a, b;                       /* 더할 두 수 */</span>
+<span class="ln">};</span>
+<span class="ln"> </span>
+<span class="ln">static void die(const char *what)   /* 실패한 호출 이름과 errno 메시지를 내고 끝낸다 */</span>
+<span class="ln">{</span>
+<span class="ln">    perror(what);</span>
+<span class="ln">    exit(1);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* 응답 FIFO의 경로: 서버 FIFO 이름 뒤에 클라이언트 PID를 붙인다. */</span>
+<span class="ln">static void reply_path(char *buf, size_t size, const char *fifo, pid_t pid)</span>
+<span class="ln">{</span>
+<span class="ln">    snprintf(buf, size, &quot;%s.%ld&quot;, fifo, (long)pid);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* serve: 요청을 하나씩 읽어 답한다. pid가 0인 요청을 받으면 끝낸다. */</span>
+<span class="ln">static int run_serve(const char *fifo)</span>
+<span class="ln">{</span>
+<span class="ln">    struct request rq;</span>
+<span class="ln">    char path[256];</span>
+<span class="ln">    long served = 0;                /* 답한 요청 수 */</span>
+<span class="ln">    ssize_t n;</span>
+<span class="ln"> </span>
+<span class="ln">    if (mkfifo(fifo, 0600) == -1 &amp;&amp; errno != EEXIST)</span>
+<span class="ln">        die(&quot;mkfifo&quot;);</span>
+<span class="ln">    signal(SIGPIPE, SIG_IGN);       /* 답을 안 읽고 떠난 클라이언트 때문에 죽지 않는다 */</span>
+<span class="ln">    printf(&quot;[서버 %ld] %s 에서 기다린다\n&quot;, (long)getpid(), fifo);</span>
+<span class="ln">    fflush(stdout);</span>
+<span class="ln"> </span>
+<span class="ln">    int in = open(fifo, O_RDONLY);  /* 첫 클라이언트가 열 때까지 잠든다 */</span>
+<span class="ln">    if (in == -1)</span>
+<span class="ln">        die(&quot;open&quot;);</span>
+<span class="ln">    int hold = open(fifo, O_WRONLY);    /* 서버도 쓰기 끝을 하나 쥔다: EOF가 안 온다 */</span>
+<span class="ln">    if (hold == -1)</span>
+<span class="ln">        die(&quot;open&quot;);</span>
+<span class="ln"> </span>
+<span class="ln">    while ((n = read(in, &amp;rq, sizeof rq)) == (ssize_t)sizeof rq) {  /* 요청 하나씩 */</span>
+<span class="ln">        if (rq.pid == 0)            /* stop이 보낸 종료 요청 */</span>
+<span class="ln">            break;</span>
+<span class="ln">        int sum = rq.a + rq.b;</span>
+<span class="ln">        reply_path(path, sizeof path, fifo, rq.pid);</span>
+<span class="ln">        int out = open(path, O_WRONLY);     /* 그 클라이언트의 응답 FIFO */</span>
+<span class="ln">        if (out == -1) {</span>
+<span class="ln">            perror(path);           /* 클라이언트가 사라졌다: 건너뛴다 */</span>
+<span class="ln">            continue;</span>
+<span class="ln">        }</span>
+<span class="ln">        if (write(out, &amp;sum, sizeof sum) == -1)</span>
+<span class="ln">            perror(&quot;write&quot;);</span>
+<span class="ln">        close(out);                 /* 클라이언트가 EOF를 받는다 */</span>
+<span class="ln">        served++;</span>
+<span class="ln">        printf(&quot;[서버] %ld번째: PID %ld  %d + %d = %d\n&quot;,</span>
+<span class="ln">               served, (long)rq.pid, rq.a, rq.b, sum);</span>
+<span class="ln">        fflush(stdout);</span>
+<span class="ln">    }</span>
+<span class="ln">    close(hold);</span>
+<span class="ln">    close(in);</span>
+<span class="ln">    unlink(fifo);                   /* 이름을 지운다 */</span>
+<span class="ln">    printf(&quot;[서버] 요청 %ld개를 처리하고 끝낸다\n&quot;, served);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* 요청 하나를 보내고 답을 받아 돌려준다. 실패하면 프로세스를 끝낸다. */</span>
+<span class="ln">static int ask(const char *fifo, int a, int b)</span>
+<span class="ln">{</span>
+<span class="ln">    struct request rq = { getpid(), a, b };</span>
+<span class="ln">    char path[256];</span>
+<span class="ln">    int sum;</span>
+<span class="ln"> </span>
+<span class="ln">    reply_path(path, sizeof path, fifo, rq.pid);</span>
+<span class="ln">    if (mkfifo(path, 0600) == -1 &amp;&amp; errno != EEXIST)    /* ① 답 받을 곳부터 만든다 */</span>
+<span class="ln">        die(&quot;mkfifo&quot;);</span>
+<span class="ln">    int out = open(fifo, O_WRONLY);                     /* ② 서버 FIFO를 연다 */</span>
+<span class="ln">    if (out == -1) {</span>
+<span class="ln">        perror(fifo);               /* 서버가 없다 (ENOENT) */</span>
+<span class="ln">        unlink(path);</span>
+<span class="ln">        exit(1);</span>
+<span class="ln">    }</span>
+<span class="ln">    if (write(out, &amp;rq, sizeof rq) != (ssize_t)sizeof rq)   /* ③ 요청: write 한 번 */</span>
+<span class="ln">        die(&quot;write&quot;);</span>
+<span class="ln">    close(out);</span>
+<span class="ln">    int in = open(path, O_RDONLY);                      /* ④ 서버가 열 때까지 잠든다 */</span>
+<span class="ln">    if (in == -1)</span>
+<span class="ln">        die(&quot;open&quot;);</span>
+<span class="ln">    if (read(in, &amp;sum, sizeof sum) != (ssize_t)sizeof sum)  /* ⑤ 답을 읽는다 */</span>
+<span class="ln">        die(&quot;read&quot;);</span>
+<span class="ln">    close(in);</span>
+<span class="ln">    unlink(path);                   /* 내 응답 FIFO를 지운다 */</span>
+<span class="ln">    return sum;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* burst: 자식 K개가 동시에 하나씩 묻는다. 모두 맞는 답을 받았는지 센다. */</span>
+<span class="ln">static int run_burst(const char *fifo, int k)</span>
+<span class="ln">{</span>
+<span class="ln">    int ok = 0;                     /* 맞는 답을 받은 자식 수 */</span>
+<span class="ln"> </span>
+<span class="ln">    for (int i = 1; i &lt;= k; i++) {</span>
+<span class="ln">        pid_t pid = fork();</span>
+<span class="ln">        if (pid == -1)</span>
+<span class="ln">            die(&quot;fork&quot;);</span>
+<span class="ln">        if (pid == 0)               /* 자식마다 PID가 달라 응답 FIFO도 다르다 */</span>
+<span class="ln">            exit(ask(fifo, i, i * 1000) == i + i * 1000 ? 0 : 1);</span>
+<span class="ln">    }</span>
+<span class="ln">    for (int i = 0; i &lt; k; i++) {</span>
+<span class="ln">        int st;</span>
+<span class="ln">        if (wait(&amp;st) != -1 &amp;&amp; WIFEXITED(st) &amp;&amp; WEXITSTATUS(st) == 0)</span>
+<span class="ln">            ok++;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;[묶음] 동시에 %d개를 보내 %d개가 맞는 답을 받았다\n&quot;, k, ok);</span>
+<span class="ln">    return ok == k ? 0 : 1;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* stop: pid가 0인 요청을 보내 서버를 끝낸다. */</span>
+<span class="ln">static int run_stop(const char *fifo)</span>
+<span class="ln">{</span>
+<span class="ln">    struct request rq = { 0, 0, 0 };</span>
+<span class="ln">    int out = open(fifo, O_WRONLY);</span>
+<span class="ln"> </span>
+<span class="ln">    if (out == -1) {</span>
+<span class="ln">        perror(fifo);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (write(out, &amp;rq, sizeof rq) == -1)</span>
+<span class="ln">        die(&quot;write&quot;);</span>
+<span class="ln">    close(out);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc == 3 &amp;&amp; strcmp(argv[1], &quot;serve&quot;) == 0)</span>
+<span class="ln">        return run_serve(argv[2]);</span>
+<span class="ln">    if (argc == 5 &amp;&amp; strcmp(argv[1], &quot;ask&quot;) == 0) {</span>
+<span class="ln">        int a = atoi(argv[3]), b = atoi(argv[4]);</span>
+<span class="ln">        printf(&quot;[클라이언트 %ld] %d + %d = %d\n&quot;, (long)getpid(), a, b, ask(argv[2], a, b));</span>
+<span class="ln">        return 0;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (argc == 4 &amp;&amp; strcmp(argv[1], &quot;burst&quot;) == 0)</span>
+<span class="ln">        return run_burst(argv[2], atoi(argv[3]));</span>
+<span class="ln">    if (argc == 3 &amp;&amp; strcmp(argv[1], &quot;stop&quot;) == 0)</span>
+<span class="ln">        return run_stop(argv[2]);</span>
+<span class="ln">    fprintf(stderr, &quot;사용법: %s serve FIFO | ask FIFO A B | burst FIFO K | stop FIFO\n&quot;,</span>
+<span class="ln">            argv[0]);</span>
+<span class="ln">    return 2;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="pipeline.html">← pipeline</a>
+    <span></span>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

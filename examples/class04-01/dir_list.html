@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dir_list — 리눅스 파일과 디렉토리 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class04-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">4주차 1차시</a><span class="sep">/</span><span>dir_list</span></nav>
+  <header>
+    <h1>dir_list</h1>
+    <p>opendir/readdir/closedir로 디렉토리의 이름 목록을 읽습니다. . 과 .. 도 출력하며, errno를 0으로 초기화해 끝과 오류를 구분합니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class04-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="rm -rf dirlist_lab &amp;&amp; mkdir -p dirlist_lab/sub &amp;&amp; printf 'hello\n' &gt; dirlist_lab/a.txt &amp;&amp; touch dirlist_lab/.hidden" title="터미널에서 실행" aria-label="실행: rm -rf dirlist_lab &amp;&amp; mkdir -p dirlist_lab/sub &amp;&amp; printf 'hello\n' &gt; dirlist_lab/a.txt &amp;&amp; touch dirlist_lab/.hidden">▶</button><code>rm -rf dirlist_lab &amp;&amp; mkdir -p dirlist_lab/sub &amp;&amp; printf 'hello\n' &gt; dirlist_lab/a.txt &amp;&amp; touch dirlist_lab/.hidden</code></div>
+          <p>파일, 숨김 파일, 하위 디렉토리를 준비합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./dir_list dirlist_lab" title="터미널에서 실행" aria-label="실행: ./dir_list dirlist_lab">▶</button><code>./dir_list dirlist_lab</code></div>
+          <p>. 과 .. , .hidden까지 모든 이름이 한 줄씩 나옵니다(순서는 정렬되지 않음).</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="ls -a dirlist_lab" title="터미널에서 실행" aria-label="실행: ls -a dirlist_lab">▶</button><code>ls -a dirlist_lab</code></div>
+          <p>ls -a 결과와 같은 이름 집합인지 비교합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./dir_list dirlist_lab/a.txt; echo &quot;status=$?&quot;" title="터미널에서 실행" aria-label="실행: ./dir_list dirlist_lab/a.txt; echo &quot;status=$?&quot;">▶</button><code>./dir_list dirlist_lab/a.txt; echo &quot;status=$?&quot;</code></div>
+          <p>일반 파일은 ENOTDIR(Not a directory)로 실패합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./dir_list dirlist_lab/missing; echo &quot;status=$?&quot;" title="터미널에서 실행" aria-label="실행: ./dir_list dirlist_lab/missing; echo &quot;status=$?&quot;">▶</button><code>./dir_list dirlist_lab/missing; echo &quot;status=$?&quot;</code></div>
+          <p>없는 경로는 ENOENT로 실패합니다.</p>
+        </li>
+      </ol>
+      <p class="callout">_FILE_OFFSET_BITS=64 없이 빌드되어 d_ino/d_off가 32비트를 넘는 파일시스템에서는 readdir가 EOVERFLOW를 낼 수 있습니다. tmpfs에서는 문제가 없습니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>dir_list.c <span class="muted">49줄</span></summary>
+      <pre class="code"><code><span class="ln">#define _POSIX_C_SOURCE 200809L</span>
+<span class="ln">#include &lt;dirent.h&gt;</span>
+<span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc != 2) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s DIRECTORY\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    DIR *dir = opendir(argv[1]);</span>
+<span class="ln">    if (dir == NULL) {</span>
+<span class="ln">        perror(argv[1]);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    int status = 0;</span>
+<span class="ln">    for (;;) {</span>
+<span class="ln">        /* NULL이 끝인지 오류인지 구분하기 위해 호출 직전에 초기화한다. */</span>
+<span class="ln">        errno = 0;</span>
+<span class="ln">        struct dirent *entry = readdir(dir);</span>
+<span class="ln">        if (entry == NULL) {</span>
+<span class="ln">            if (errno != 0) {</span>
+<span class="ln">                perror(&quot;readdir&quot;);</span>
+<span class="ln">                status = 1;</span>
+<span class="ln">            }</span>
+<span class="ln">            break;</span>
+<span class="ln">        }</span>
+<span class="ln"> </span>
+<span class="ln">        /* 이름만 출력한다. 이 기초 예제는 .과 ..도 보여 준다. */</span>
+<span class="ln">        if (puts(entry-&gt;d_name) == EOF) {</span>
+<span class="ln">            perror(&quot;stdout&quot;);</span>
+<span class="ln">            status = 1;</span>
+<span class="ln">            break;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    if (closedir(dir) == -1) {</span>
+<span class="ln">        perror(&quot;closedir&quot;);</span>
+<span class="ln">        status = 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        status = 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return status;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="dir_create.html">← dir_create</a>
+    <a href="dir_chdir.html">dir_chdir →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

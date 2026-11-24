@@ -1,0 +1,80 @@
+{
+  "class": "class05-01",
+  "title": "시스템 정보와 자원 한계",
+  "summary": "uname·sysconf·sysinfo로 시스템 정보를 조회하고, getrlimit/setrlimit로 자원 한계를 다루며, /proc으로 프로세스 상태를 관찰하는 예제입니다.",
+  "examples": [
+    {
+      "name": "sysprobe",
+      "source": "sysprobe.c",
+      "summary": "uname(2)의 필드와 sysconf(3) 값(온라인 CPU 수, 페이지 크기, CLK_TCK, OPEN_MAX, ARG_MAX)을 출력합니다. sysconf의 -1 반환을 errno로 구분하는 계약을 보여 줍니다.",
+      "steps": [
+        { "cmd": "./sysprobe", "note": "sysname, release, machine과 cpus_online, pagesize, clk_tck, open_max, arg_max 값을 확인합니다." },
+        { "cmd": "uname -a", "note": "sysprobe의 각 필드가 uname 명령의 어느 열과 대응하는지 맞춥니다." },
+        { "cmd": "uname -r; uname -m", "note": "release와 machine 필드만 따로 비교합니다." },
+        { "cmd": "ulimit -Sn", "note": "open_max 값은 셸의 FD soft 한계와 같습니다." },
+        { "cmd": "strace -e trace=uname ./sysprobe", "note": "uname 시스템 호출과 커널이 채워 준 구조체를 확인합니다." }
+      ],
+      "manual": false,
+      "expect": "sysname=Linux",
+      "notes": "이 VM은 32비트 단일 CPU이므로 machine=i686, cpus_online=1이 나옵니다. getconf 명령은 없으므로 ulimit으로 교차 확인합니다. strace 출력에는 동적 로더가 호출한 uname이 함께 보일 수 있습니다."
+    },
+    {
+      "name": "limit_show",
+      "source": "limit_show.c",
+      "summary": "getrlimit(2)로 nofile, as, stack, fsize, cpu, nproc, core의 soft·hard 한계를 출력하고 RLIM_INFINITY는 unlimited로 표시합니다.",
+      "steps": [
+        { "cmd": "./limit_show", "note": "자원별 soft·hard 값을 봅니다. unlimited는 RLIM_INFINITY입니다." },
+        { "cmd": "./limit_show | head -1", "note": "nofile(열 수 있는 FD 수) 줄만 봅니다." },
+        { "cmd": "ulimit -Sn; ulimit -Hn", "note": "셸의 soft·hard 값이 nofile 줄과 같은지 확인합니다." },
+        { "cmd": "grep -E 'Limit|open files|stack|processes' /proc/self/limits", "note": "커널이 보여 주는 /proc/self/limits의 같은 항목과 비교합니다." }
+      ],
+      "manual": false,
+      "expect": "nofile  soft=",
+      "notes": "_FILE_OFFSET_BITS=64로 빌드되어 32비트에서도 rlim_t가 64비트이며 unlimited가 올바르게 표시됩니다."
+    },
+    {
+      "name": "nofile_demo",
+      "source": "nofile_demo.c",
+      "summary": "/dev/null을 EMFILE이 날 때까지 반복해서 열어 FD 한계를 실험합니다. --raise N을 주면 setrlimit(2)로 soft 한계를 N(hard 이하)으로 바꾼 뒤 측정합니다.",
+      "steps": [
+        { "cmd": "./nofile_demo", "note": "opened는 soft 한계보다 3 정도 작습니다(표준 입출력 FD 0~2가 이미 열려 있음). stopped=EMFILE을 확인합니다." },
+        { "cmd": "./nofile_demo --raise 64", "note": "soft를 64로 낮춘 뒤(after soft=64) opened가 61 근처에서 멈춥니다." },
+        { "cmd": "./nofile_demo --raise 4096", "note": "hard 이하이면 상향되고, hard보다 큰 값은 프로그램이 hard로 줄여서 설정합니다." },
+        { "cmd": "(ulimit -Sn 32 && ./nofile_demo)", "note": "서브셸에서 soft를 32로 낮추면 자식 프로세스가 그 한계를 물려받습니다." },
+        { "cmd": "ulimit -Sn", "note": "서브셸 밖의 셸 한계는 그대로입니다." }
+      ],
+      "manual": false,
+      "expect": "closed all descriptors",
+      "notes": "root가 아니므로 hard 한계를 넘는 상향은 불가능합니다. README의 bash -c 예시는 bash가 없어 ash 서브셸 ( ... )로 대체했습니다."
+    },
+    {
+      "name": "proc_probe",
+      "source": "proc_probe.c",
+      "summary": "/proc/self/status에서 VmRSS·Threads 줄을 골라 출력하고, /proc/loadavg 첫 줄과 /proc/self/fd의 항목 수를 셉니다.",
+      "steps": [
+        { "cmd": "./proc_probe", "note": "VmRSS, Threads, loadavg, fd 개수(count)를 확인합니다. opendir 자체가 FD 하나를 쓰므로 count는 보통 4입니다." },
+        { "cmd": "grep -E 'VmRSS|Threads' /proc/self/status", "note": "여기서 self는 grep 프로세스이므로 값이 조금 다른 것이 정상입니다." },
+        { "cmd": "cat /proc/loadavg", "note": "proc_probe의 loadavg 줄과 같은 형식인지 비교합니다." },
+        { "cmd": "ls /proc/self/fd | wc -l", "note": "ls 프로세스가 가진 FD 개수입니다." },
+        { "cmd": "grep 'open files' /proc/self/limits", "note": "FD 한계도 /proc에서 읽을 수 있습니다." }
+      ],
+      "manual": false,
+      "expect": "count="
+    },
+    {
+      "name": "sysinfo_demo",
+      "source": "sysinfo_demo.c",
+      "summary": "Linux 전용 sysinfo(2)로 uptime, 부하 평균(고정소수점), 프로세스 수, 전체·여유 메모리를 출력합니다. 조건부 컴파일로 플랫폼을 구분하는 예입니다.",
+      "steps": [
+        { "cmd": "./sysinfo_demo", "note": "uptime, loadavg, procs, totalram, freeram, mem_unit을 확인합니다." },
+        { "cmd": "cat /proc/uptime", "note": "첫 값이 uptime과 같은 규모(초)인지 봅니다." },
+        { "cmd": "cat /proc/loadavg", "note": "loads 필드를 65536으로 나눈 값과 앞의 세 숫자를 비교합니다." },
+        { "cmd": "head -2 /proc/meminfo", "note": "MemTotal·MemFree(kB)를 totalram·freeram(바이트)과 비교합니다." },
+        { "cmd": "strace -e trace=sysinfo ./sysinfo_demo", "note": "sysinfo 시스템 호출이 채운 구조체를 확인합니다." }
+      ],
+      "manual": false,
+      "expect": "mem_unit=",
+      "notes": "32비트에서는 unsigned long이 4바이트라 totalram*mem_unit이 4GiB 이상이면 넘치지만, 이 VM은 256MB라 문제없습니다."
+    }
+  ]
+}

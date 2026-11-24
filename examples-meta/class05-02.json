@@ -1,0 +1,76 @@
+{
+  "class": "class05-02",
+  "title": "시간과 시계",
+  "summary": "time·localtime·strftime·mktime으로 달력 시간을 다루고, clock_gettime(CLOCK_MONOTONIC)으로 경과 시간을 재며, 타임스탬프 로그와 시계별 해상도를 관찰하는 예제입니다.",
+  "examples": [
+    {
+      "name": "calendar_demo",
+      "source": "calendar_demo.c",
+      "summary": "time(2)으로 에포크 초를 얻어 localtime·gmtime·strftime으로 문자열로 바꾸고, 약 1.2초 뒤 다시 읽어 difftime을 출력합니다. TZ 환경변수가 local 문자열을 바꿉니다.",
+      "steps": [
+        { "cmd": "./calendar_demo", "note": "epoch, local, utc가 나오고 약 1.2초 뒤 difftime(1.0 또는 2.0)이 출력됩니다." },
+        { "cmd": "TZ=KST-9 ./calendar_demo", "note": "local이 utc보다 정확히 9시간 앞서는지 확인합니다." },
+        { "cmd": "TZ=UTC0 ./calendar_demo", "note": "TZ를 UTC로 바꾸면 local과 utc의 시각이 같아집니다. epoch는 TZ와 무관합니다." },
+        { "cmd": "date +%s; date; date -u", "note": "epoch 값과 date 명령의 결과를 교차 확인합니다." }
+      ],
+      "manual": false,
+      "expect": "difftime=",
+      "notes": "각 실행은 1.2초 동안 바쁜 대기를 합니다. 게스트에 zoneinfo 파일이 없을 수 있어 README의 TZ=Asia/Seoul 대신 POSIX 형식(KST-9, UTC0)을 사용했습니다. 32비트라 time_t와 long이 4바이트이며, 대기 루프의 나노초 계산은 경과가 2초 미만일 때만 long 범위에 들어갑니다(VM이 오래 멈추면 대기가 몇 초 길어질 수 있음)."
+    },
+    {
+      "name": "tm_normalize",
+      "source": "tm_normalize.c",
+      "summary": "struct tm을 직접 채워 mktime(3)에 넘기면 범위를 벗어난 날짜가 정규화되는 것을 보여 줍니다. tm_mon이 0부터 시작하는 것과 윤년 처리를 확인합니다.",
+      "steps": [
+        { "cmd": "./tm_normalize", "note": "2026-01-32→2026-02-01, 2026-12-32→2027-01-01, 2025-02-29→2025-03-01, 2024-02-29는 그대로입니다." },
+        { "cmd": "TZ=UTC0 ./tm_normalize", "note": "정오(12시)로 채웠으므로 시간대를 바꿔도 날짜 결과는 같습니다." },
+        { "cmd": "date -d '2026-02-01' '+%Y-%m-%d %a'", "note": "date 명령으로 요일(tm_wday=0, 일요일)을 교차 확인합니다." }
+      ],
+      "manual": false,
+      "expect": "mktime 결과 2027-01-01",
+      "notes": "출력에 한글(UTF-8)이 포함됩니다. 32비트 time_t라 2038년 1월 이후 날짜는 mktime이 실패하지만 예제의 날짜는 모두 범위 안입니다."
+    },
+    {
+      "name": "elapsed_demo",
+      "source": "elapsed_demo.c",
+      "summary": "CLOCK_MONOTONIC을 나노초 정수로 바꿔 같은 작업을 다섯 번 측정하고 min·median·max를 출력합니다. --clocks는 시계별 현재 값과 해상도(clock_getres)를 보여 줍니다.",
+      "steps": [
+        { "cmd": "./elapsed_demo", "note": "run1~run5 값이 매번 달라도 min <= median <= max 관계는 유지됩니다." },
+        { "cmd": "./elapsed_demo", "note": "다시 실행해 측정값의 흔들림을 비교합니다." },
+        { "cmd": "./elapsed_demo --clocks", "note": "CLOCK_REALTIME의 now는 에포크 초, CLOCK_MONOTONIC의 now는 부팅 후 초입니다. res는 해상도입니다." },
+        { "cmd": "date +%s; cat /proc/uptime", "note": "두 시계의 now 값을 각각 date +%s, /proc/uptime과 비교합니다." }
+      ],
+      "manual": false,
+      "expect": "median=",
+      "notes": "단일 CPU의 브라우저 VM에서는 측정값이 실제 PC보다 훨씬 크고 편차도 큽니다. 한 번 실행에 수 초가 걸릴 수 있습니다."
+    },
+    {
+      "name": "tslog",
+      "source": "tslog.c",
+      "summary": "달력 시각 + 단조 시계 경과 시간 + 메시지로 로그 한 줄을 만듭니다. 기본은 stderr, -o FILE은 추가 모드로 열어 기록하고 줄마다 fflush합니다.",
+      "steps": [
+        { "cmd": "TZ=KST-9 ./tslog --demo", "note": "다섯 줄이 화면(stderr)에 나옵니다. 인접한 줄의 경과 시간 차는 약 12ms입니다." },
+        { "cmd": "rm -f run.log; ./tslog -o run.log --demo", "note": "같은 내용을 파일에 기록합니다(화면 출력 없음)." },
+        { "cmd": "./tslog -o run.log 'second run'", "note": "메시지를 인자로 주면 그 문자열이 한 줄로 기록됩니다." },
+        { "cmd": "cat run.log", "note": "추가 모드라 앞의 다섯 줄 뒤에 'second run'이 이어집니다." },
+        { "cmd": "./tslog; echo \"status=$?\"", "note": "메시지도 --demo도 없으면 usage와 종료 상태 2입니다." }
+      ],
+      "manual": false,
+      "expect": "second run",
+      "notes": "게스트에 zoneinfo가 없을 수 있어 TZ=Asia/Seoul 대신 POSIX 형식 TZ=KST-9를 사용했습니다."
+    },
+    {
+      "name": "clock_show",
+      "source": "clock_show.c",
+      "summary": "CLOCK_REALTIME, MONOTONIC, MONOTONIC_RAW, BOOTTIME, PROCESS/THREAD_CPUTIME_ID의 현재 값과 해상도를 출력하고, 지원하지 않는 시계는 unsupported로 표시합니다.",
+      "steps": [
+        { "cmd": "./clock_show", "note": "시계마다 원점이 다릅니다. CPUTIME 시계의 now는 이 프로세스가 쓴 CPU 시간이라 매우 작습니다." },
+        { "cmd": "date +%s", "note": "CLOCK_REALTIME의 now와 같은 에포크 초입니다." },
+        { "cmd": "cat /proc/uptime", "note": "첫 값이 CLOCK_MONOTONIC·CLOCK_BOOTTIME의 now와 비슷한 규모입니다." }
+      ],
+      "manual": false,
+      "expect": "CLOCK_MONOTONIC",
+      "notes": "res 값은 VM의 클럭 소스에 따라 달라집니다(예: 0.000000001 또는 더 굵은 눈금)."
+    }
+  ]
+}

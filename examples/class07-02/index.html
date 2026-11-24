@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>7주차 2차시 프로세스 심화: 측정하고 실험하기 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body data-root="../../">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><span>7주차 2차시</span></nav>
+  <header>
+    <h1>프로세스 심화: 측정하고 실험하기</h1>
+    <p>요구 페이징, /proc/PID/stat 해석, user·sys·대기 시간, 좀비·고아, 자원 한계 초과를 숫자로 측정하고 실험한다.</p>
+  </header>
+  <main class="list">
+    <ul class="cards">
+      <li><a href="pagetouch.html"><strong>pagetouch</strong><span>큰 블록을 malloc한 뒤 페이지를 하나씩 건드리며 VmRSS와 minor page fault(getrusage의 minflt) 변화를 단계별로 출력해 요구 페이징을 보여 준다.</span></a></li>
+      <li><a href="pstat.html"><strong>pstat</strong><span>/proc/PID/stat 한 줄을 해석해 상태·CPU 시간·메모리·폴트 수를 출력하고, 1초 간격 표본의 틱 차이로 %CPU를 계산하는 미니 top이다.</span></a></li>
+      <li><a href="cpu_wait.html"><strong>cpu_wait</strong><span>같은 1초를 사용자 모드 계산(busy), 시스템 호출 반복(sys), 잠자기(sleep)로 보내고 getrusage로 user·sys CPU 시간과 자발적·비자발적 문맥 교환 횟수를 비교한다.</span></a></li>
+      <li><a href="reap_show.html"><strong>reap_show</strong><span>fork한 자식이 먼저 끝났는데 부모가 waitpid를 미루면 좀비(Z)가 되고, 부모가 먼저 끝나면 고아가 되어 새 부모에게 입양되는 과정을 보여 준다.</span></a></li>
+      <li><a href="limit_lab.html"><strong>limit_lab</strong><span>setrlimit으로 soft 한계(NOFILE·AS·CPU)를 낮춘 뒤 일부러 넘겨 EMFILE, ENOMEM, SIGXCPU가 각각 어떻게 나타나는지 확인한다.</span></a></li>
+    </ul>
+  </main>
+</body>
+</html>

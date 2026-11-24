@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>suspend_demo — 시그널 심화: 블록·보류·sigsuspend·안전한 핸들러 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class09-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">9주차 2차시</a><span class="sep">/</span><span>suspend_demo</span></nav>
+  <header>
+    <h1>suspend_demo</h1>
+    <p>SIGUSR1을 블록한 채 보류시켜 놓고 pause는 깨어나지 못해 alarm에 구제되지만, sigsuspend는 마스크를 원자적으로 바꿔 즉시 깨어나고 돌아올 때 마스크를 복구함을 비교한다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class09-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./suspend_demo suspend" title="터미널에서 실행" aria-label="실행: ./suspend_demo suspend">▶</button><code>./suspend_demo suspend</code></div>
+          <p>보류 중인 SIGUSR1을 바로 받아 0.00초에 깨어나고 마스크가 복구된다</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./suspend_demo pause" title="터미널에서 실행" aria-label="실행: ./suspend_demo pause">▶</button><code>./suspend_demo pause</code></div>
+          <p>보류된(블록된) 시그널은 pause를 깨우지 못해 3초 뒤 SIGALRM으로 깨어난다. 마스크를 풀어야 USR1 전달</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./suspend_demo; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./suspend_demo; echo &quot;exit=$?&quot;">▶</button><code>./suspend_demo; echo &quot;exit=$?&quot;</code></div>
+          <p>인자가 없으면 usage, 종료 상태 2</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>suspend_demo.c <span class="muted">125줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;signal.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;time.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* pause와 sigsuspend의 차이입니다. 두 모드 다 SIGUSR1을 블록한 채</span>
+<span class="ln">   raise로 보류를 만들어 놓고 기다립니다. 보류 중인 시그널은</span>
+<span class="ln">   pause를 깨우지 못해 3초 뒤 alarm에 구제되지만, sigsuspend는</span>
+<span class="ln">   마스크를 원자적으로 바꿔 보류 시그널을 즉시 받고 돌아올 때</span>
+<span class="ln">   원래 마스크로 복구합니다. 검사와 대기 사이의 경쟁 창이</span>
+<span class="ln">   없다는 것이 sigsuspend의 핵심입니다. */</span>
+<span class="ln"> </span>
+<span class="ln">static volatile sig_atomic_t usr1 = 0;</span>
+<span class="ln">static volatile sig_atomic_t alarms = 0;</span>
+<span class="ln"> </span>
+<span class="ln">static void on_usr1(int sig)</span>
+<span class="ln">{</span>
+<span class="ln">    static const char msg[] = &quot;  [handler] SIGUSR1 delivered\n&quot;;</span>
+<span class="ln">    (void)sig;</span>
+<span class="ln">    ssize_t r = write(STDOUT_FILENO, msg, sizeof msg - 1);</span>
+<span class="ln">    (void)r;</span>
+<span class="ln">    usr1++;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void on_alarm(int sig)</span>
+<span class="ln">{</span>
+<span class="ln">    static const char msg[] = &quot;  [handler] SIGALRM\n&quot;;</span>
+<span class="ln">    (void)sig;</span>
+<span class="ln">    ssize_t r = write(STDOUT_FILENO, msg, sizeof msg - 1);</span>
+<span class="ln">    (void)r;</span>
+<span class="ln">    alarms++;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static double now(void)</span>
+<span class="ln">{</span>
+<span class="ln">    struct timespec ts;</span>
+<span class="ln">    clock_gettime(CLOCK_MONOTONIC, &amp;ts);</span>
+<span class="ln">    return ts.tv_sec + ts.tv_nsec / 1e9;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void setup_handlers(void)</span>
+<span class="ln">{</span>
+<span class="ln">    struct sigaction sa;</span>
+<span class="ln">    memset(&amp;sa, 0, sizeof sa);</span>
+<span class="ln">    sa.sa_handler = on_usr1;</span>
+<span class="ln">    sigemptyset(&amp;sa.sa_mask);</span>
+<span class="ln">    if (sigaction(SIGUSR1, &amp;sa, NULL) == -1) {</span>
+<span class="ln">        perror(&quot;sigaction&quot;);</span>
+<span class="ln">        exit(1);</span>
+<span class="ln">    }</span>
+<span class="ln">    memset(&amp;sa, 0, sizeof sa);</span>
+<span class="ln">    sa.sa_handler = on_alarm;   /* 구제용 안전망(alarm이 pause를 깨운다) */</span>
+<span class="ln">    sigemptyset(&amp;sa.sa_mask);</span>
+<span class="ln">    if (sigaction(SIGALRM, &amp;sa, NULL) == -1) {</span>
+<span class="ln">        perror(&quot;sigaction&quot;);</span>
+<span class="ln">        exit(1);</span>
+<span class="ln">    }</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static sigset_t block_usr1(sigset_t *old)</span>
+<span class="ln">{</span>
+<span class="ln">    sigset_t block;</span>
+<span class="ln">    sigemptyset(&amp;block);</span>
+<span class="ln">    sigaddset(&amp;block, SIGUSR1);</span>
+<span class="ln">    if (sigprocmask(SIG_BLOCK, &amp;block, old) == -1) {</span>
+<span class="ln">        perror(&quot;sigprocmask&quot;);</span>
+<span class="ln">        exit(1);</span>
+<span class="ln">    }</span>
+<span class="ln">    return block;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void make_pending(void)</span>
+<span class="ln">{</span>
+<span class="ln">    sigset_t pend;</span>
+<span class="ln">    raise(SIGUSR1);             /* 블록되어 있으므로 보류만 된다 */</span>
+<span class="ln">    sigpending(&amp;pend);</span>
+<span class="ln">    printf(&quot;  SIGUSR1 raised and pending (blocked): usr1=%d\n&quot;, (int)usr1);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    sigset_t old;</span>
+<span class="ln">    if (argc != 2</span>
+<span class="ln">        || (strcmp(argv[1], &quot;pause&quot;) != 0 &amp;&amp; strcmp(argv[1], &quot;suspend&quot;) != 0)) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s pause|suspend\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    setup_handlers();</span>
+<span class="ln">    block_usr1(&amp;old);</span>
+<span class="ln">    make_pending();</span>
+<span class="ln">    double t0 = now();</span>
+<span class="ln">    if (strcmp(argv[1], &quot;pause&quot;) == 0) {</span>
+<span class="ln">        alarm(3);               /* pause가 영원히 돌아오지 않는 안전망 */</span>
+<span class="ln">        printf(&quot;pause(): waiting — a pending BLOCKED signal cannot wake it\n&quot;);</span>
+<span class="ln">        fflush(stdout);</span>
+<span class="ln">        int rc = pause();</span>
+<span class="ln">        double t = now() - t0;</span>
+<span class="ln">        alarm(0);</span>
+<span class="ln">        printf(&quot;pause: %d (%s) after %.2fs -&gt; woke by ALRM, usr1=%d\n&quot;,</span>
+<span class="ln">               rc, strerror(errno), t, (int)usr1);</span>
+<span class="ln">        printf(&quot;restore mask: the pending SIGUSR1 is delivered now\n&quot;);</span>
+<span class="ln">        fflush(stdout);</span>
+<span class="ln">        sigprocmask(SIG_SETMASK, &amp;old, NULL);</span>
+<span class="ln">        printf(&quot;after restore: usr1=%d\n&quot;, (int)usr1);</span>
+<span class="ln">    } else {</span>
+<span class="ln">        sigset_t empty;</span>
+<span class="ln">        alarm(10);              /* 이론상 오지 않는 안전망 */</span>
+<span class="ln">        printf(&quot;sigsuspend(&amp;empty): waiting — mask swaps atomically\n&quot;);</span>
+<span class="ln">        fflush(stdout);</span>
+<span class="ln">        sigemptyset(&amp;empty);</span>
+<span class="ln">        int rc = sigsuspend(&amp;empty);</span>
+<span class="ln">        double t = now() - t0;</span>
+<span class="ln">        printf(&quot;sigsuspend: %d (%s) after %.2fs -&gt; woke at once, usr1=%d\n&quot;,</span>
+<span class="ln">               rc, strerror(errno), t, (int)usr1);</span>
+<span class="ln">        sigset_t cur;</span>
+<span class="ln">        sigprocmask(SIG_BLOCK, NULL, &amp;cur);</span>
+<span class="ln">        printf(&quot;mask restored: %s\n&quot;,</span>
+<span class="ln">               sigismember(&amp;cur, SIGUSR1) ? &quot;SIGUSR1 blocked again&quot; : &quot;NOT blocked?&quot;);</span>
+<span class="ln">        alarm(0);</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="block_pending.html">← block_pending</a>
+    <a href="safe_flag.html">safe_flag →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

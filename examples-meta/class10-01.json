@@ -1,0 +1,95 @@
+{
+  "class": "class10-01",
+  "title": "프로세스 생성과 실행: fork · exec · wait",
+  "summary": "fork로 프로세스를 만들고 exec로 프로그램을 교체하며 wait·waitpid로 종료 상태를 회수하는 흐름과 atexit·stdio 버퍼의 동작을 다룬다.",
+  "examples": [
+    {
+      "name": "fork",
+      "source": "fork.c",
+      "summary": "fork가 한 번 호출되어 부모(자식 PID 반환)와 자식(0 반환)에서 두 번 반환되는 것을 getpid·getppid 출력으로 확인한다.",
+      "steps": [
+        { "cmd": "./fork; sleep 1", "note": "부모·자식이 각각 한 줄씩 찍고 'End of fork'가 두 번 나온다" },
+        { "cmd": "echo $$", "note": "부모의 'My Parent's PID'가 셸의 PID와 같은지 대조" },
+        { "cmd": "./fork | cat", "note": "파이프에서도 줄 수가 같은지, 순서가 바뀌는지 관찰" }
+      ],
+      "manual": false,
+      "expect": "End of fork",
+      "notes": "부모가 wait하지 않으므로 부모가 먼저 끝나면 자식의 PPID가 1(init)로 찍히거나 프롬프트 뒤에 자식 출력이 나올 수 있다."
+    },
+    {
+      "name": "execlp",
+      "source": "execlp.c",
+      "summary": "execlp가 PATH에서 ls를 찾아 현재 프로세스를 교체하므로 성공하면 exec 뒤의 코드는 실행되지 않고, 실패할 때만 -1로 돌아옴을 보여 준다.",
+      "steps": [
+        { "cmd": "./execlp", "note": "'Before' 다음에 ls -a 결과가 나오고 'After'는 나오지 않는다" },
+        { "cmd": "./execlp | head -3", "note": "파이프(완전 버퍼링)에서는 버퍼에 있던 'Before' 줄이 exec와 함께 사라진다" },
+        { "cmd": "./execlp > out.txt; head -3 out.txt; rm -f out.txt", "note": "파일로 보내도 'Before'가 없다" },
+        { "cmd": "PATH=/nonexistent ./execlp; echo \"exit=$?\"", "note": "ls를 찾지 못하면 execlp가 -1로 돌아와 perror 후 exit=1" }
+      ],
+      "manual": false,
+      "expect": "execlp.c",
+      "notes": "게스트의 ls는 BusyBox 애플릿이라 출력 모양이 GNU ls와 조금 다르다."
+    },
+    {
+      "name": "execv",
+      "source": "execv.c",
+      "summary": "execv에 실행 파일 경로(/bin/ls)와 인자 배열을 직접 넘겨 프로세스를 교체한다. PATH 탐색이 없다는 점이 execlp와 다르다.",
+      "steps": [
+        { "cmd": "./execv", "note": "'Before exec function' 다음에 ls -a 결과, 'After'는 없다" },
+        { "cmd": "./execv | head -3", "note": "파이프에서는 'Before' 줄이 사라진다" },
+        { "cmd": "PATH=/nonexistent ./execv | tail -3", "note": "경로를 직접 주므로 PATH가 틀려도 실행된다" }
+      ],
+      "manual": false,
+      "expect": "execv.c",
+      "notes": "/bin/ls가 BusyBox로 가는 링크로 존재한다고 가정한다. 없으면 'execv: No such file or directory'가 나온다."
+    },
+    {
+      "name": "forkNexec",
+      "source": "forkNexec.c",
+      "summary": "fork한 자식에서 execlp로 ls를 실행하는, 셸이 명령을 실행하는 방식(fork + exec)을 보여 준다. 부모는 기다리지 않고 끝난다.",
+      "steps": [
+        { "cmd": "./forkNexec; sleep 1", "note": "부모는 PID만 찍고 끝나고, 자식은 '--> Child Process' 뒤 ls -a로 바뀐다" },
+        { "cmd": "./forkNexec | head -4", "note": "파이프에서는 자식의 '--> Child Process' 줄이 exec로 사라진다" },
+        { "cmd": "strace -f -e trace=process -o st.txt ./forkNexec > /dev/null; sleep 1; cat st.txt; rm -f st.txt", "note": "clone(fork) → 자식의 execve(ls) → 각자의 exit_group 순서를 시스템 호출로 확인" }
+      ],
+      "manual": false,
+      "expect": "forkNexec.c",
+      "notes": "부모가 wait하지 않아 프롬프트가 ls 출력보다 먼저 돌아올 수 있다. i686에서는 fork가 clone 시스템 호출로, 처음의 execve는 32비트 ABI로 기록된다."
+    },
+    {
+      "name": "wait",
+      "source": "wait.c",
+      "summary": "자식이 exit(2)로 끝나면 부모가 wait로 회수해 status(512 = 0x200)와 WEXITSTATUS(2)를 출력한다.",
+      "steps": [
+        { "cmd": "./wait; echo \"exit=$?\"", "note": "Status: 512, 200 → 상위 바이트가 종료 코드 2. 부모 자신의 종료 상태는 0" },
+        { "cmd": "strace -f -e trace=process -o st2.txt ./wait > /dev/null; cat st2.txt; rm -f st2.txt", "note": "자식의 exit_group(2), 부모의 wait4/waitpid 반환값, SIGCHLD(si_status=2)를 찾는다" }
+      ],
+      "manual": false,
+      "expect": "Status: 512, 200",
+      "notes": "실행 파일 이름이 셸 내장 명령 wait와 같으므로 반드시 ./wait로 실행한다."
+    },
+    {
+      "name": "waitpid",
+      "source": "waitpid.c",
+      "summary": "자식이 3초 자는 동안 부모가 waitpid(WNOHANG)로 1초마다 찔러 보고(0 반환), 자식이 끝나면 종료 코드 3을 회수한다.",
+      "steps": [
+        { "cmd": "./waitpid", "note": "'Parent still wait...'가 3~4번 찍힌 뒤 Child Exit Status : 3" },
+        { "cmd": "./waitpid & sleep 1; ps | grep '[w]aitpid'; wait", "note": "기다리는 동안 부모·자식 두 프로세스가 모두 살아 있음을 ps로 확인" }
+      ],
+      "manual": false,
+      "expect": "Child Exit Status : 3",
+      "notes": "각 단계는 약 3초 걸린다. BusyBox ps는 'ps -o pid,ppid,stat,cmd' 형식 대신 기본 출력으로 본다."
+    },
+    {
+      "name": "atexit",
+      "source": "atexit.c",
+      "summary": "atexit로 등록한 정리 함수가 exit 호출 시 등록의 역순으로 실행됨을 보여 준다.",
+      "steps": [
+        { "cmd": "./atexit; echo \"exit=$?\"", "note": "Cleanup 2가 먼저, Cleanup 1이 나중에 호출된다. exit=0" },
+        { "cmd": "./atexit | cat", "note": "파이프에서도 exit가 stdio 버퍼를 비워 두 줄이 모두 나온다" }
+      ],
+      "manual": false,
+      "expect": "Cleanup 2 is called."
+    }
+  ]
+}

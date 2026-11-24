@@ -1,0 +1,62 @@
+{
+  "class": "class12-01",
+  "title": "파이프 (pipe · dup2 · popen · FIFO)",
+  "summary": "pipe로 만든 익명 파이프의 읽기·쓰기 끝과 EOF, SIGPIPE/EPIPE, 용량을 확인하고, 셸의 CMD1 | CMD2 를 pipe · fork · dup2 · exec로 직접 만들며, popen과 FIFO(이름 있는 파이프)를 써 보는 예제입니다.",
+  "examples": [
+    {
+      "name": "pipe_basic",
+      "source": "pipe_basic.c",
+      "summary": "한 프로세스 안에서 pipe()로 파이프를 만들고 쓰기 끝에 쓴 뒤, 쓰기 끝을 닫고 읽기 끝에서 EOF까지 읽습니다.",
+      "steps": [
+        { "cmd": "./pipe_basic", "note": "fd[0] = 3, fd[1] = 4 (0·1·2 다음의 빈 번호)와 파이프를 거쳐 돌아온 hello pipe가 출력된다." },
+        { "cmd": "strace -e trace=pipe,pipe2,read,write,close ./pipe_basic 2>&1 | tail -10", "note": "pipe → write(4, \"hello pipe\\n\", 11) → close(4) → read(3) = 11 → read(3) = 0(EOF) 순서를 확인한다. 쓰기 끝을 닫았기 때문에 둘째 read가 0을 돌려준다." }
+      ],
+      "manual": false,
+      "expect": "hello pipe"
+    },
+    {
+      "name": "pipemsg",
+      "source": "pipemsg.c",
+      "summary": "부모가 파이프로 두 줄을 보내고 자식이 읽습니다. 쓰지 않는 끝점 닫기와 EOF의 관계(ok/leak), 읽는 쪽이 없을 때의 SIGPIPE와 EPIPE, 파이프 용량(cap)을 모드별로 확인합니다.",
+      "steps": [
+        { "cmd": "./pipemsg ok", "note": "자식이 15바이트씩 두 번 읽고, 부모가 쓰기 끝을 닫자 read 0 → EOF를 보고 종료 코드 0으로 끝난다." },
+        { "cmd": "timeout 2 ./pipemsg leak; echo \"exit=$?\"", "note": "자식이 자기 쓰기 끝을 닫지 않아 EOF가 오지 않는다. 부모도 waitpid에서 멈추므로 2초 뒤 timeout이 부모를 끝낸다 (EOF 줄이 나오지 않는다)." },
+        { "cmd": "ps -o pid,ppid,stat,comm | grep pipemsg; kill $(ps -o pid,comm | awk '$2 == \"pipemsg\" {print $1}')", "note": "부모가 죽은 뒤에도 자식 pipemsg는 read에서 잠든 채 남아 있다. 확인한 뒤 kill로 정리한다." },
+        { "cmd": "./pipemsg sigpipe; echo \"exit=$?\"", "note": "읽기 끝이 없는 파이프에 쓰면 SIGPIPE로 죽는다. exit=141 (128 + 13)." },
+        { "cmd": "./pipemsg epipe; echo \"exit=$?\"", "note": "SIGPIPE를 무시하면 write가 -1을 돌려주고 errno는 EPIPE(Broken pipe, 32)가 된다." },
+        { "cmd": "./pipemsg cap", "note": "아무도 읽지 않을 때 65536바이트까지 들어가고 그다음 write는 EAGAIN이다. PIPE_BUF = 4096, F_GETPIPE_SZ = 65536." }
+      ],
+      "manual": false,
+      "expect": "F_GETPIPE_SZ = 65536",
+      "notes": "leak 모드는 스스로 끝나지 않으므로 timeout과 kill로 정리합니다. BusyBox timeout은 부모 프로세스에만 SIGTERM을 보내므로(exit=143) 남은 자식은 셋째 단계에서 직접 지웁니다."
+    },
+    {
+      "name": "pipe2",
+      "source": "pipe2.c",
+      "summary": "셸의 CMD1 | CMD2 > FILE 을 pipe · fork · dup2 · execvp로 직접 만듭니다. -o FILE은 CMD2의 표준 출력을 파일로 돌리고, -k는 부모가 쓰기 끝을 닫지 않아 EOF가 오지 않는 상황을 재현합니다.",
+      "steps": [
+        { "cmd": "./pipe2 ls -- wc -l", "note": "ls | wc -l 과 같은 결과가 나온다. stderr에 두 자식의 종료 코드가 따로 보고된다." },
+        { "cmd": "./pipe2 -o out.txt ls -- grep pipe; cat out.txt; rm -f out.txt", "note": "ls | grep pipe > out.txt 와 같다. 화면에는 종료 보고만 나오고 결과는 out.txt에 들어간다." },
+        { "cmd": "./pipe2 yes -- head -2", "note": "head가 두 줄만 읽고 끝나면 yes는 읽는 쪽이 없는 파이프에 쓰다가 시그널 13(SIGPIPE)으로 죽는다." },
+        { "cmd": "./pipe2 ls -- grep zzz; echo \"exit=$?\"", "note": "셸처럼 마지막 명령(grep)의 종료 코드 1이 pipe2의 종료 코드가 된다." },
+        { "cmd": "timeout 2 ./pipe2 -k ls -- wc -l; echo \"exit=$?\"; sleep 1", "note": "-k: 부모가 쓰기 끝을 쥐고 있어 wc가 EOF를 받지 못하고 멈춘다. 2초 뒤 부모가 죽어 쓰기 끝이 닫히면 그제야 wc가 줄 수를 출력한다." }
+      ],
+      "manual": false,
+      "expect": "ls: 종료 코드 0",
+      "notes": "ls · wc · grep · yes · head는 BusyBox 애플릿이며 execvp가 PATH에서 찾아 실행합니다."
+    },
+    {
+      "name": "pipeio",
+      "source": "pipeio.c",
+      "summary": "파이프를 쓰는 다른 두 방법을 보여 줍니다. popen은 셸 명령의 출력을 FILE*로 읽고 pclose로 종료 코드를 받으며, recv/send는 mkfifo로 만든 FIFO를 통해 서로 무관한 두 프로세스가 통신합니다.",
+      "steps": [
+        { "cmd": "./pipeio popen \"ls | sort | head -5\"", "note": "명령의 출력에 줄 번호를 붙여 내고, 줄 수와 명령의 종료 코드 0을 보고한다." },
+        { "cmd": "./pipeio popen \"exit 3\"", "note": "pclose가 돌려준 상태에서 명령의 종료 코드 3을 꺼낸다 (줄 수 0)." },
+        { "cmd": "./pipeio recv chan & sleep 1; ls -l chan; ./pipeio send chan \"hello fifo\"; wait", "note": "recv가 FIFO를 만들고 open에서 쓰는 쪽을 기다린다 (ls -l 맨 앞 글자가 p). send가 한 줄을 쓰고 닫으면 recv는 11바이트를 읽고 EOF를 본 뒤 FIFO를 지운다." },
+        { "cmd": "ls chan 2>&1; ./pipeio send nope x; echo \"exit=$?\"", "note": "recv가 unlink했으므로 chan은 없다. 없는 FIFO에 send하면 open이 ENOENT로 실패한다 (exit=1)." }
+      ],
+      "manual": false,
+      "expect": "11바이트: hello fifo"
+    }
+  ]
+}

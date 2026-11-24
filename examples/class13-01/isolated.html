@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>isolated — IPC와 POSIX 메시지 큐 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class13-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">13주차 1차시</a><span class="sep">/</span><span>isolated</span></nav>
+  <header>
+    <h1>isolated</h1>
+    <p>fork 뒤에 자식이 전역 변수와 힙의 값을 고쳐도 부모에게는 보이지 않음을 보여 줍니다. 가상 주소는 같지만 서로 다른 메모리이며, 부모에게 돌아오는 것은 8비트 종료 상태뿐입니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class13-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./isolated" title="터미널에서 실행" aria-label="실행: ./isolated">▶</button><code>./isolated</code></div>
+          <p>자식은 counter=101, *heap=201 이지만 부모는 100, 200 그대로다. 괄호 안의 주소는 양쪽이 같다. 부모가 받은 것은 종료 상태 42뿐이다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="strace -f -e trace=clone,wait4,exit_group ./isolated 2&gt;&amp;1 | tail -8" title="터미널에서 실행" aria-label="실행: strace -f -e trace=clone,wait4,exit_group ./isolated 2&gt;&amp;1 | tail -8">▶</button><code>strace -f -e trace=clone,wait4,exit_group ./isolated 2&gt;&amp;1 | tail -8</code></div>
+          <p>clone으로 자식이 생기고, 자식의 exit_group(42)가 부모의 wait4 결과로 전달되는 과정을 확인한다.</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>isolated.c <span class="muted">33줄</span></summary>
+      <pre class="code"><code><span class="ln">/* isolated.c — fork 뒤에는 변수를 고쳐도 서로 보이지 않는다 (IPC가 필요한 이유) */</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;sys/wait.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">int counter = 100;                      /* 전역 변수 (데이터 영역) */</span>
+<span class="ln"> </span>
+<span class="ln">int main(void)</span>
+<span class="ln">{</span>
+<span class="ln">    int *heap = malloc(sizeof *heap);   /* 힙 */</span>
+<span class="ln">    if (heap == NULL) { perror(&quot;malloc&quot;); return 1; }</span>
+<span class="ln">    *heap = 200;</span>
+<span class="ln"> </span>
+<span class="ln">    pid_t pid = fork();</span>
+<span class="ln">    if (pid == -1) { perror(&quot;fork&quot;); return 1; }</span>
+<span class="ln"> </span>
+<span class="ln">    if (pid == 0) {                     /* 자식: 두 값을 고친다 */</span>
+<span class="ln">        counter += 1;</span>
+<span class="ln">        *heap += 1;</span>
+<span class="ln">        printf(&quot;[자식 %d] counter=%d (%p)  *heap=%d (%p)\n&quot;, (int)getpid(),</span>
+<span class="ln">               counter, (void *)&amp;counter, *heap, (void *)heap);</span>
+<span class="ln">        return 42;                      /* 부모에게 가는 것은 이 8비트뿐 */</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    int status;</span>
+<span class="ln">    waitpid(pid, &amp;status, 0);           /* 자식이 고친 뒤에 확인한다 */</span>
+<span class="ln">    printf(&quot;[부모 %d] counter=%d (%p)  *heap=%d (%p)\n&quot;, (int)getpid(),</span>
+<span class="ln">           counter, (void *)&amp;counter, *heap, (void *)heap);</span>
+<span class="ln">    printf(&quot;[부모 %d] 자식에게서 받은 것: 종료 상태 %d\n&quot;, (int)getpid(),</span>
+<span class="ln">           WEXITSTATUS(status));</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <span></span>
+    <a href="pmq.html">pmq →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

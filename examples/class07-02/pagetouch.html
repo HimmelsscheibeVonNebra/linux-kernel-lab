@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pagetouch — 프로세스 심화: 측정하고 실험하기 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class07-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">7주차 2차시</a><span class="sep">/</span><span>pagetouch</span></nav>
+  <header>
+    <h1>pagetouch</h1>
+    <p>큰 블록을 malloc한 뒤 페이지를 하나씩 건드리며 VmRSS와 minor page fault(getrusage의 minflt) 변화를 단계별로 출력해 요구 페이징을 보여 준다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class07-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pagetouch 8" title="터미널에서 실행" aria-label="실행: ./pagetouch 8">▶</button><code>./pagetouch 8</code></div>
+          <p>after_malloc에서는 rss가 그대로, touch_half·touch_all에서 rss와 minflt가 페이지 수만큼 증가</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pagetouch 32" title="터미널에서 실행" aria-label="실행: ./pagetouch 32">▶</button><code>./pagetouch 32</code></div>
+          <p>32MiB = 8192쪽: minflt 증가분을 먼저 예측해 보고 확인. touch_again에서는 늘지 않는다</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pagetouch 0; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./pagetouch 0; echo &quot;exit=$?&quot;">▶</button><code>./pagetouch 0; echo &quot;exit=$?&quot;</code></div>
+          <p>범위 밖 인자는 usage, 종료 상태 2</p>
+        </li>
+      </ol>
+      <p class="callout">게스트 RAM이 256MB이고 루트 파일 시스템도 RAM에 있으므로 작은 값(8~64)만 쓴다. 큰 값(수백 MiB)은 OOM으로 강제 종료되거나 32비트 주소 공간 한계로 malloc이 실패할 수 있다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>pagetouch.c <span class="muted">94줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;sys/resource.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* 요구 페이징(demand paging)을 숫자로 확인한다. 큰 블록을 malloc한</span>
+<span class="ln">   직후에는 VmRSS가 거의 늘지 않고, 페이지마다 한 바이트씩 써서</span>
+<span class="ln">   처음 건드릴 때마다 minor page fault가 일어나며 RSS가 늘어난다.</span>
+<span class="ln">   minflt는 getrusage(표준 API), VmRSS는 /proc/self/status(Linux)</span>
+<span class="ln">   에서 읽는다. /proc가 없으면 rss_kib=unavailable로 표시한다. */</span>
+<span class="ln"> </span>
+<span class="ln">static long rss_kib(void)</span>
+<span class="ln">{</span>
+<span class="ln">    FILE *fp = fopen(&quot;/proc/self/status&quot;, &quot;r&quot;);</span>
+<span class="ln">    if (fp == NULL)</span>
+<span class="ln">        return -1;</span>
+<span class="ln">    char line[256];</span>
+<span class="ln">    long kib = -1;</span>
+<span class="ln">    while (fgets(line, sizeof line, fp) != NULL) {</span>
+<span class="ln">        if (strncmp(line, &quot;VmRSS:&quot;, 6) == 0) {</span>
+<span class="ln">            kib = strtol(line + 6, NULL, 10);</span>
+<span class="ln">            break;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    fclose(fp);</span>
+<span class="ln">    return kib;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void report(const char *stage)</span>
+<span class="ln">{</span>
+<span class="ln">    struct rusage ru;</span>
+<span class="ln">    if (getrusage(RUSAGE_SELF, &amp;ru) == -1) {</span>
+<span class="ln">        perror(&quot;getrusage&quot;);</span>
+<span class="ln">        exit(1);</span>
+<span class="ln">    }</span>
+<span class="ln">    long kib = rss_kib();</span>
+<span class="ln">    if (kib &lt; 0)</span>
+<span class="ln">        printf(&quot;stage=%-12s rss_kib=unavailable minflt=%ld majflt=%ld\n&quot;,</span>
+<span class="ln">               stage, ru.ru_minflt, ru.ru_majflt);</span>
+<span class="ln">    else</span>
+<span class="ln">        printf(&quot;stage=%-12s rss_kib=%-7ld minflt=%ld majflt=%ld\n&quot;,</span>
+<span class="ln">               stage, kib, ru.ru_minflt, ru.ru_majflt);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    long mib = 64;</span>
+<span class="ln">    if (argc &gt; 2) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s [MiB 1-1024]\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (argc == 2) {</span>
+<span class="ln">        char *end = NULL;</span>
+<span class="ln">        mib = strtol(argv[1], &amp;end, 10);</span>
+<span class="ln">        if (end == argv[1] || *end != '\0' || mib &lt; 1 || mib &gt; 1024) {</span>
+<span class="ln">            fprintf(stderr, &quot;usage: %s [MiB 1-1024]\n&quot;, argv[0]);</span>
+<span class="ln">            return 2;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    long page = sysconf(_SC_PAGESIZE);</span>
+<span class="ln">    if (page &lt;= 0) {</span>
+<span class="ln">        perror(&quot;sysconf&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    size_t size = (size_t)mib * 1024 * 1024;</span>
+<span class="ln">    size_t pages = size / (size_t)page;</span>
+<span class="ln">    printf(&quot;pid=%ld size_mib=%ld page=%ld pages=%zu\n&quot;,</span>
+<span class="ln">           (long)getpid(), mib, page, pages);</span>
+<span class="ln">    report(&quot;start&quot;);</span>
+<span class="ln">    /* volatile: 해제 직전의 쓰기를 컴파일러가 지우지 못하게 한다 */</span>
+<span class="ln">    volatile char *buf = malloc(size);</span>
+<span class="ln">    if (buf == NULL) {</span>
+<span class="ln">        perror(&quot;malloc&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    report(&quot;after_malloc&quot;);</span>
+<span class="ln">    for (size_t i = 0; i &lt; pages / 2; i++)</span>
+<span class="ln">        buf[i * (size_t)page] = 1;</span>
+<span class="ln">    report(&quot;touch_half&quot;);</span>
+<span class="ln">    for (size_t i = pages / 2; i &lt; pages; i++)</span>
+<span class="ln">        buf[i * (size_t)page] = 1;</span>
+<span class="ln">    report(&quot;touch_all&quot;);</span>
+<span class="ln">    for (size_t i = 0; i &lt; pages; i++)</span>
+<span class="ln">        buf[i * (size_t)page] = 2;</span>
+<span class="ln">    report(&quot;touch_again&quot;);</span>
+<span class="ln">    free((void *)buf);</span>
+<span class="ln">    report(&quot;after_free&quot;);</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <span></span>
+    <a href="pstat.html">pstat →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

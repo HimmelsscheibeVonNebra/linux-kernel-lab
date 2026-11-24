@@ -1,0 +1,9 @@
+config BR2_PACKAGE_KERNELLAB_MODULES
+	bool "kernellab-modules"
+	depends on BR2_LINUX_KERNEL
+	help
+	  Exercise kernel modules of the Linux Kernel Lab
+	  (sources live in exercises/ at the repository root).
+
+comment "kernellab-modules needs a Linux kernel to be built"
+	depends on !BR2_LINUX_KERNEL

@@ -1,0 +1,9 @@
+#!/bin/sh
+# Serial-console shell for the web pages.
+#   lab.dir=<class> on the kernel command line: user "student" in that
+#   class's example directory.  Otherwise: root shell (kernel module lab).
+dir=$(sed -n 's/.*lab\.dir=\([^ ]*\).*/\1/p' /proc/cmdline)
+if [ -n "$dir" ] && [ -d "/home/student/$dir" ]; then
+	exec su -l student
+fi
+exec /bin/sh -l

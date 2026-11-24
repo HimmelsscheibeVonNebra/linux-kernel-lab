@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>shmhello — 공유 메모리 · 세마포어 · 스레드 동기화 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class13-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">13주차 2차시</a><span class="sep">/</span><span>shmhello</span></nav>
+  <header>
+    <h1>shmhello</h1>
+    <p>shm_open · ftruncate · mmap(MAP_SHARED)으로 이름 있는 공유 메모리 /w13_hello 에 글을 써 두고, 서로 무관한 다른 프로세스가 같은 이름으로 붙여 읽습니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class13-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./shmhello write &quot;hello shm&quot;" title="터미널에서 실행" aria-label="실행: ./shmhello write &quot;hello shm&quot;">▶</button><code>./shmhello write &quot;hello shm&quot;</code></div>
+          <p>공유 메모리를 만들고 글을 써 둔 뒤 프로세스가 끝난다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./shmhello read" title="터미널에서 실행" aria-label="실행: ./shmhello read">▶</button><code>./shmhello read</code></div>
+          <p>다른 프로세스(PID가 다르다)가 같은 이름으로 붙여 &quot;hello shm&quot;을 읽는다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="ls -l /dev/shm/w13_hello; od -c /dev/shm/w13_hello | head -2" title="터미널에서 실행" aria-label="실행: ls -l /dev/shm/w13_hello; od -c /dev/shm/w13_hello | head -2">▶</button><code>ls -l /dev/shm/w13_hello; od -c /dev/shm/w13_hello | head -2</code></div>
+          <p>공유 메모리 객체는 /dev/shm 아래의 4096바이트 파일로 보이고, 내용도 파일로 읽을 수 있다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./shmhello rm; ./shmhello read; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./shmhello rm; ./shmhello read; echo &quot;exit=$?&quot;">▶</button><code>./shmhello rm; ./shmhello read; echo &quot;exit=$?&quot;</code></div>
+          <p>shm_unlink로 이름을 지우면 다시 열 수 없다 (No such file or directory, exit=1).</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>shmhello.c <span class="muted">45줄</span></summary>
+      <pre class="code"><code><span class="ln">/* shmhello.c — 이름 있는 공유 메모리에 글을 써 두고, 다른 프로세스가 읽는다</span>
+<span class="ln"> *   ./shmhello write TEXT   만들고(없으면) 글을 써 둔다</span>
+<span class="ln"> *   ./shmhello read         붙여서 읽는다</span>
+<span class="ln"> *   ./shmhello rm           이름을 지운다</span>
+<span class="ln"> */</span>
+<span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;sys/mman.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">#define NAME &quot;/w13_hello&quot;</span>
+<span class="ln">#define SIZE 4096</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    const char *cmd = argc &gt; 1 ? argv[1] : &quot;&quot;;</span>
+<span class="ln"> </span>
+<span class="ln">    if (!strcmp(cmd, &quot;write&quot;) &amp;&amp; argc == 3) {</span>
+<span class="ln">        int fd = shm_open(NAME, O_CREAT | O_RDWR, 0600);   /* ① 이름으로 연다 */</span>
+<span class="ln">        if (fd == -1) { perror(&quot;shm_open&quot;); return 1; }</span>
+<span class="ln">        if (ftruncate(fd, SIZE) == -1) { perror(&quot;ftruncate&quot;); return 1; }  /* ② */</span>
+<span class="ln">        char *p = mmap(NULL, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);</span>
+<span class="ln">        if (p == MAP_FAILED) { perror(&quot;mmap&quot;); return 1; } /* ③ 붙인다 */</span>
+<span class="ln">        close(fd);                      /* 붙인 뒤에는 fd가 필요 없다 */</span>
+<span class="ln">        snprintf(p, SIZE, &quot;%s&quot;, argv[2]);       /* 그냥 메모리에 쓴다 */</span>
+<span class="ln">        printf(&quot;[%d] 씀: \&quot;%s\&quot; (주소 %p)\n&quot;, (int)getpid(), p, (void *)p);</span>
+<span class="ln">        munmap(p, SIZE);</span>
+<span class="ln">    } else if (!strcmp(cmd, &quot;read&quot;) &amp;&amp; argc == 2) {</span>
+<span class="ln">        int fd = shm_open(NAME, O_RDONLY, 0);</span>
+<span class="ln">        if (fd == -1) { perror(&quot;shm_open&quot;); return 1; }</span>
+<span class="ln">        char *p = mmap(NULL, SIZE, PROT_READ, MAP_SHARED, fd, 0);</span>
+<span class="ln">        if (p == MAP_FAILED) { perror(&quot;mmap&quot;); return 1; }</span>
+<span class="ln">        close(fd);</span>
+<span class="ln">        printf(&quot;[%d] 읽음: \&quot;%s\&quot; (주소 %p)\n&quot;, (int)getpid(), p, (void *)p);</span>
+<span class="ln">        munmap(p, SIZE);</span>
+<span class="ln">    } else if (!strcmp(cmd, &quot;rm&quot;) &amp;&amp; argc == 2) {</span>
+<span class="ln">        if (shm_unlink(NAME) == -1) { perror(&quot;shm_unlink&quot;); return 1; }</span>
+<span class="ln">        printf(&quot;지움: %s\n&quot;, NAME);</span>
+<span class="ln">    } else {</span>
+<span class="ln">        fprintf(stderr, &quot;사용법: %s write TEXT | read | rm\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <span></span>
+    <a href="shmrace.html">shmrace →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>execv — 프로세스 생성과 실행: fork · exec · wait · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class10-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">10주차 1차시</a><span class="sep">/</span><span>execv</span></nav>
+  <header>
+    <h1>execv</h1>
+    <p>execv에 실행 파일 경로(/bin/ls)와 인자 배열을 직접 넘겨 프로세스를 교체한다. PATH 탐색이 없다는 점이 execlp와 다르다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class10-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./execv" title="터미널에서 실행" aria-label="실행: ./execv">▶</button><code>./execv</code></div>
+          <p>'Before exec function' 다음에 ls -a 결과, 'After'는 없다</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./execv | head -3" title="터미널에서 실행" aria-label="실행: ./execv | head -3">▶</button><code>./execv | head -3</code></div>
+          <p>파이프에서는 'Before' 줄이 사라진다</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="PATH=/nonexistent ./execv | tail -3" title="터미널에서 실행" aria-label="실행: PATH=/nonexistent ./execv | tail -3">▶</button><code>PATH=/nonexistent ./execv | tail -3</code></div>
+          <p>경로를 직접 주므로 PATH가 틀려도 실행된다</p>
+        </li>
+      </ol>
+      <p class="callout">/bin/ls가 BusyBox로 가는 링크로 존재한다고 가정한다. 없으면 'execv: No such file or directory'가 나온다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>execv.c <span class="muted">21줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">int main(void) {</span>
+<span class="ln">    char *argv[3];</span>
+<span class="ln"> </span>
+<span class="ln">    printf(&quot;Before exec function\n&quot;);</span>
+<span class="ln"> </span>
+<span class="ln">    argv[0] = &quot;ls&quot;;</span>
+<span class="ln">    argv[1] = &quot;-a&quot;;</span>
+<span class="ln">    argv[2] = NULL;</span>
+<span class="ln">    if (execv(&quot;/bin/ls&quot;, argv) == -1) {</span>
+<span class="ln">        perror(&quot;execv&quot;);</span>
+<span class="ln">        exit(1);</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    printf(&quot;After exec function\n&quot;);</span>
+<span class="ln"> </span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="execlp.html">← execlp</a>
+    <a href="forkNexec.html">forkNexec →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

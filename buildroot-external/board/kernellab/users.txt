@@ -1,0 +1,1 @@
+student 1000 student 1000 * /home/student /bin/sh - Student

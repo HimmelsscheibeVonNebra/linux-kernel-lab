@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>forkpool — 부모가 자식을 제어하기 (fork · waitpid · kill) · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class10-03">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">10주차 3차시</a><span class="sep">/</span><span>forkpool</span></nav>
+  <header>
+    <h1>forkpool</h1>
+    <p>시그널 없이 fork와 waitpid(-1)만으로 작업 풀을 만듭니다. 동시에 도는 자식 수를 MAXPAR로 제한하고, 종료 코드로 성공·실패를 판정해 실패한 작업(작업 3의 첫 시도)을 한 번 더 시킵니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class10-03</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./forkpool 6 2" title="터미널에서 실행" aria-label="실행: ./forkpool 6 2">▶</button><code>./forkpool 6 2</code></div>
+          <p>작업 6개를 두 자리로 돌린다. start가 7번(6개 + 재시도 1번) 나오고, job 3은 FAIL (exit 1) -&gt; retry 뒤 try 2로 다시 시작한다. 동시에 도는 자식은 2개를 넘지 않는다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="for p in 1 2 3 6; do printf 'MAXPAR=%d ' $p; ./forkpool 6 $p | tail -1; done" title="터미널에서 실행" aria-label="실행: for p in 1 2 3 6; do printf 'MAXPAR=%d ' $p; ./forkpool 6 $p | tail -1; done">▶</button><code>for p in 1 2 3 6; do printf 'MAXPAR=%d ' $p; ./forkpool 6 $p | tail -1; done</code></div>
+          <p>자리 수를 늘릴수록 전체 시간이 줄어든다 (MAXPAR=1은 약 2600 ms, MAXPAR=6은 약 600 ms).</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./forkpool; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./forkpool; echo &quot;exit=$?&quot;">▶</button><code>./forkpool; echo &quot;exit=$?&quot;</code></div>
+          <p>인자가 없으면 사용법을 내고 종료 코드 2로 끝난다.</p>
+        </li>
+      </ol>
+      <p class="callout">CPU가 1개여도 자식은 대부분 nanosleep으로 자고 있으므로 병렬 효과(시간 단축)는 그대로 보입니다. 브라우저 VM에서는 ms 값이 교안보다 조금 크게 나올 수 있습니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>forkpool.c <span class="muted">105줄</span></summary>
+      <pre class="code"><code><span class="ln">/* forkpool.c — 부모가 fork로 자식 여러 개에게 일을 나눠 주고,</span>
+<span class="ln"> *              동시에 도는 수를 제한하고, 종료 코드로 성공·실패를 판정해</span>
+<span class="ln"> *              실패한 일은 한 번 더 시킨다. (시그널 없이 fork·waitpid만)</span>
+<span class="ln"> * 사용법: ./forkpool NJOBS MAXPAR        예: ./forkpool 6 2</span>
+<span class="ln"> *   작업 i는 (i % 3 + 1) × 200 ms 동안 일하고 끝난다.</span>
+<span class="ln"> *   작업 3은 첫 시도에서 실패(exit 1)하도록 만들어 두었다.</span>
+<span class="ln"> */</span>
+<span class="ln">#define _POSIX_C_SOURCE 200809L</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;time.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln">#include &lt;sys/wait.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">#define MAXJOBS  32</span>
+<span class="ln">#define FAIL_JOB 3</span>
+<span class="ln">#define MAXTRIES 2</span>
+<span class="ln"> </span>
+<span class="ln">struct job { pid_t pid; int tries; };</span>
+<span class="ln">static struct job jobs[MAXJOBS];</span>
+<span class="ln">static struct timespec t0;</span>
+<span class="ln"> </span>
+<span class="ln">static long ms(void)  /* 시작 뒤 경과 시간(ms) */</span>
+<span class="ln">{</span>
+<span class="ln">    struct timespec t;</span>
+<span class="ln">    clock_gettime(CLOCK_MONOTONIC, &amp;t);</span>
+<span class="ln">    return (t.tv_sec - t0.tv_sec) * 1000</span>
+<span class="ln">         + (t.tv_nsec - t0.tv_nsec) / 1000000;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void child_work(int id, int attempt)  /* 자식에서만 실행된다 */</span>
+<span class="ln">{</span>
+<span class="ln">    struct timespec d = { 0, (id % 3 + 1) * 200000000L };</span>
+<span class="ln">    nanosleep(&amp;d, NULL);</span>
+<span class="ln">    if (id == FAIL_JOB &amp;&amp; attempt == 1)</span>
+<span class="ln">        _exit(1);  /* 첫 시도는 실패로 보고 */</span>
+<span class="ln">    _exit(0);  /* 성공 */</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void start(int id)</span>
+<span class="ln">{</span>
+<span class="ln">    jobs[id].tries++;</span>
+<span class="ln">    fflush(stdout);  /* 버퍼를 비우고 fork */</span>
+<span class="ln">    pid_t pid = fork();</span>
+<span class="ln">    if (pid &lt; 0) { perror(&quot;fork&quot;); exit(1); }</span>
+<span class="ln">    if (pid == 0)</span>
+<span class="ln">        child_work(id, jobs[id].tries); /* 돌아오지 않는다 */</span>
+<span class="ln">    jobs[id].pid = pid;</span>
+<span class="ln">    printf(&quot;%5ld ms  start job %d (try %d)  pid %d\n&quot;,</span>
+<span class="ln">           ms(), id, jobs[id].tries, (int)pid);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int job_of(pid_t pid, int njobs) /* PID → 작업 번호 */</span>
+<span class="ln">{</span>
+<span class="ln">    for (int i = 0; i &lt; njobs; i++)</span>
+<span class="ln">        if (jobs[i].pid == pid) return i;</span>
+<span class="ln">    return -1;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc != 3) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s NJOBS MAXPAR\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    int njobs = atoi(argv[1]), maxpar = atoi(argv[2]);</span>
+<span class="ln">    if (njobs &lt; 1 || njobs &gt; MAXJOBS || maxpar &lt; 1) {</span>
+<span class="ln">        fprintf(stderr, &quot;NJOBS 1..%d, MAXPAR &gt;= 1\n&quot;, MAXJOBS);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    clock_gettime(CLOCK_MONOTONIC, &amp;t0);</span>
+<span class="ln">    int next = 0, running = 0, finished = 0, failed = 0;</span>
+<span class="ln"> </span>
+<span class="ln">    while (finished &lt; njobs) {</span>
+<span class="ln">        while (running &lt; maxpar &amp;&amp; next &lt; njobs) {  /* 빈 자리만큼 시작 */</span>
+<span class="ln">            start(next++);</span>
+<span class="ln">            running++;</span>
+<span class="ln">        }</span>
+<span class="ln">        int status;</span>
+<span class="ln">        pid_t pid = waitpid(-1, &amp;status, 0);  /* 아무 자식이나 */</span>
+<span class="ln">        if (pid &lt; 0) {</span>
+<span class="ln">            if (errno == EINTR) continue;</span>
+<span class="ln">            perror(&quot;waitpid&quot;);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">        running--;</span>
+<span class="ln">        int id = job_of(pid, njobs);</span>
+<span class="ln">        if (WIFEXITED(status) &amp;&amp; WEXITSTATUS(status) == 0) {</span>
+<span class="ln">            printf(&quot;%5ld ms  done  job %d  pid %d\n&quot;, ms(), id, (int)pid);</span>
+<span class="ln">            finished++;</span>
+<span class="ln">        } else if (jobs[id].tries &lt; MAXTRIES) {</span>
+<span class="ln">            printf(&quot;%5ld ms  FAIL  job %d  pid %d (exit %d) -&gt; retry\n&quot;,</span>
+<span class="ln">                   ms(), id, (int)pid, WEXITSTATUS(status));</span>
+<span class="ln">            start(id);</span>
+<span class="ln">            running++;</span>
+<span class="ln">        } else {</span>
+<span class="ln">            printf(&quot;%5ld ms  give up job %d\n&quot;, ms(), id);</span>
+<span class="ln">            finished++;</span>
+<span class="ln">            failed++;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;%5ld ms  all %d jobs finished, %d failed\n&quot;, ms(), njobs, failed);</span>
+<span class="ln">    return failed ? 1 : 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <span></span>
+    <a href="sigctl.html">sigctl →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

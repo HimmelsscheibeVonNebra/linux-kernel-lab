@@ -1,0 +1,35 @@
+{
+  "class": "class10-03",
+  "title": "부모가 자식을 제어하기 (fork · waitpid · kill)",
+  "summary": "부모 프로세스가 fork와 waitpid로 자식 여러 개에게 일을 나눠 주고, 시그널(SIGUSR1·SIGSTOP·SIGCONT·SIGTERM·SIGKILL)로 자식을 제어하는 예제입니다.",
+  "examples": [
+    {
+      "name": "forkpool",
+      "source": "forkpool.c",
+      "summary": "시그널 없이 fork와 waitpid(-1)만으로 작업 풀을 만듭니다. 동시에 도는 자식 수를 MAXPAR로 제한하고, 종료 코드로 성공·실패를 판정해 실패한 작업(작업 3의 첫 시도)을 한 번 더 시킵니다.",
+      "steps": [
+        { "cmd": "./forkpool 6 2", "note": "작업 6개를 두 자리로 돌린다. start가 7번(6개 + 재시도 1번) 나오고, job 3은 FAIL (exit 1) -> retry 뒤 try 2로 다시 시작한다. 동시에 도는 자식은 2개를 넘지 않는다." },
+        { "cmd": "for p in 1 2 3 6; do printf 'MAXPAR=%d ' $p; ./forkpool 6 $p | tail -1; done", "note": "자리 수를 늘릴수록 전체 시간이 줄어든다 (MAXPAR=1은 약 2600 ms, MAXPAR=6은 약 600 ms)." },
+        { "cmd": "./forkpool; echo \"exit=$?\"", "note": "인자가 없으면 사용법을 내고 종료 코드 2로 끝난다." }
+      ],
+      "manual": false,
+      "expect": "all 6 jobs finished, 0 failed",
+      "notes": "CPU가 1개여도 자식은 대부분 nanosleep으로 자고 있으므로 병렬 효과(시간 단축)는 그대로 보입니다. 브라우저 VM에서는 ms 값이 교안보다 조금 크게 나올 수 있습니다."
+    },
+    {
+      "name": "sigctl",
+      "source": "sigctl.c",
+      "summary": "부모가 kill로 SIGUSR1(보고 요청), SIGSTOP(멈춤), SIGCONT(재개), SIGTERM(정리 종료) 또는 SIGKILL(강제 종료)을 보내고, waitpid(WUNTRACED | WCONTINUED)로 자식의 상태 변화를 확인합니다. 자식의 핸들러는 깃발만 세웁니다.",
+      "steps": [
+        { "cmd": "./sigctl", "note": "보고 → 멈춤(stopped by signal 19) → 재개(continued) → 보고 → SIGTERM. 멈춘 동안에는 ticks가 늘지 않고, 마지막에 자식이 정리한 뒤 exited with 0으로 끝난다." },
+        { "cmd": "./sigctl kill", "note": "마지막에 SIGKILL을 보낸다. 자식은 cleanup 줄 없이 killed by signal 9로 끝난다." },
+        { "cmd": "./sigctl late", "note": "자식이 핸들러를 설치하기 전에 SIGUSR1이 도착한다. 기본 동작대로 killed by signal 10 (User defined signal 1)으로 죽는다." },
+        { "cmd": "./sigctl > log.txt & sleep 0.7; ps -o pid,ppid,stat,comm | grep sigctl; wait", "note": "SIGSTOP으로 멈춘 구간(시작 뒤 약 0.45~0.95초)에 ps를 찍는다. 자식 sigctl의 STAT가 T(stopped)로 보인다." },
+        { "cmd": "cat log.txt; rm -f log.txt", "note": "백그라운드로 돌린 실행의 기록을 확인한다." }
+      ],
+      "manual": false,
+      "expect": "killed by signal 9",
+      "notes": "시그널 번호(SIGUSR1 10, SIGSTOP 19)는 x86 Linux 기준입니다. 넷째 단계는 타이밍에 의존하므로 VM이 느리면 STAT가 T 대신 S로 보일 수 있습니다. 그럴 때는 다시 실행해 보세요."
+    }
+  ]
+}

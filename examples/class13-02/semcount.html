@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>semcount — 공유 메모리 · 세마포어 · 스레드 동기화 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class13-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">13주차 2차시</a><span class="sep">/</span><span>semcount</span></nav>
+  <header>
+    <h1>semcount</h1>
+    <p>shmrace와 같은 공유 카운터를 프로세스 간 세마포어(sem_wait · sem_post)로 잠그고 올립니다. hold · try · value로 잠금이 쥐어진 상태, sem_timedwait의 시간 제한, 잠근 채 죽은 프로세스의 문제를 확인합니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class13-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./shmrace rm 2&gt;/dev/null; ./shmrace init" title="터미널에서 실행" aria-label="실행: ./shmrace rm 2&gt;/dev/null; ./shmrace init">▶</button><code>./shmrace rm 2&gt;/dev/null; ./shmrace init</code></div>
+          <p>공유 메모리와 세마포어(처음 값 1)를 shmrace init으로 만든다. semcount는 이것이 있어야 동작한다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="for i in 1 2 3 4; do ./semcount add 200000 &amp; done; wait; ./shmrace show" title="터미널에서 실행" aria-label="실행: for i in 1 2 3 4; do ./semcount add 200000 &amp; done; wait; ./shmrace show">▶</button><code>for i in 1 2 3 4; do ./semcount add 200000 &amp; done; wait; ./shmrace show</code></div>
+          <p>프로세스 4개가 세마포어로 잠그고 올리면 항상 정확히 count = 800000 이다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./semcount value" title="터미널에서 실행" aria-label="실행: ./semcount value">▶</button><code>./semcount value</code></div>
+          <p>아무도 쥐고 있지 않으면 세마포어 값 = 1 (열림).</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./semcount hold 2 &amp; sleep 1; ./semcount value; ./semcount try; wait" title="터미널에서 실행" aria-label="실행: ./semcount hold 2 &amp; sleep 1; ./semcount value; ./semcount try; wait">▶</button><code>./semcount hold 2 &amp; sleep 1; ./semcount value; ./semcount try; wait</code></div>
+          <p>hold가 쥔 동안 값은 0(잠김)이다. try는 기다리다가 hold가 2초 뒤 풀어 주면 잠그고 한 번 올린다 (count = 800001).</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./semcount hold 8 &amp; sleep 1; ./semcount try; kill $!; sleep 1; ./semcount value" title="터미널에서 실행" aria-label="실행: ./semcount hold 8 &amp; sleep 1; ./semcount try; kill $!; sleep 1; ./semcount value">▶</button><code>./semcount hold 8 &amp; sleep 1; ./semcount try; kill $!; sleep 1; ./semcount value</code></div>
+          <p>이번에는 2초 안에 풀리지 않아 try가 Connection timed out으로 포기한다. 쥐고 있던 프로세스를 kill로 죽여도 세마포어는 0(잠김)으로 남는다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./shmrace rm" title="터미널에서 실행" aria-label="실행: ./shmrace rm">▶</button><code>./shmrace rm</code></div>
+          <p>잠긴 채 남은 공유 메모리를 지운다 (다시 쓰려면 shmrace init부터).</p>
+        </li>
+      </ol>
+      <p class="callout">CPU가 1개여도 세마포어를 쓰면 결과는 항상 정확합니다. 다섯째 단계처럼 잠근 프로세스가 죽으면 세마포어는 자동으로 풀리지 않습니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>semcount.c <span class="muted">51줄</span></summary>
+      <pre class="code"><code><span class="ln">/* semcount.c — 같은 값을 세마포어로 잠그고 올린다 (shmrace init으로 만든 뒤)</span>
+<span class="ln"> *   ./semcount add N     잠그고 올리고 푼다 × N</span>
+<span class="ln"> *   ./semcount hold SEC  잠근 채로 SEC초 동안 쥐고 있는다</span>
+<span class="ln"> *   ./semcount try       2초까지만 기다렸다가 한 번 올린다</span>
+<span class="ln"> *   ./semcount value     세마포어의 지금 값</span>
+<span class="ln"> */</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;time.h&gt;</span>
+<span class="ln">#include &quot;counter.h&quot;</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    const char *cmd = argc &gt; 1 ? argv[1] : &quot;&quot;;</span>
+<span class="ln">    struct shared *s = attach(0);</span>
+<span class="ln"> </span>
+<span class="ln">    if (!strcmp(cmd, &quot;add&quot;) &amp;&amp; argc == 3) {</span>
+<span class="ln">        long n = atol(argv[2]);</span>
+<span class="ln">        for (long i = 0; i &lt; n; i++) {</span>
+<span class="ln">            sem_wait(&amp;s-&gt;lock);         /* 1 → 0. 이미 0이면 여기서 잔다 */</span>
+<span class="ln">            s-&gt;count++;                 /* 임계 구역: 한 번에 한 프로세스만 */</span>
+<span class="ln">            sem_post(&amp;s-&gt;lock);         /* 0 → 1. 기다리던 프로세스를 깨운다 */</span>
+<span class="ln">        }</span>
+<span class="ln">        printf(&quot;[%d] %ld번 올림 → count = %ld\n&quot;, (int)getpid(), n, s-&gt;count);</span>
+<span class="ln">    } else if (!strcmp(cmd, &quot;hold&quot;) &amp;&amp; argc == 3) {</span>
+<span class="ln">        sem_wait(&amp;s-&gt;lock);</span>
+<span class="ln">        printf(&quot;[%d] 잠금: %s초 동안 쥔다\n&quot;, (int)getpid(), argv[2]);</span>
+<span class="ln">        fflush(stdout);</span>
+<span class="ln">        sleep((unsigned)atoi(argv[2])); /* 이 사이에 죽으면 잠긴 채로 남는다 */</span>
+<span class="ln">        sem_post(&amp;s-&gt;lock);</span>
+<span class="ln">        printf(&quot;[%d] 풂\n&quot;, (int)getpid());</span>
+<span class="ln">    } else if (!strcmp(cmd, &quot;try&quot;) &amp;&amp; argc == 2) {</span>
+<span class="ln">        struct timespec until;</span>
+<span class="ln">        clock_gettime(CLOCK_REALTIME, &amp;until);</span>
+<span class="ln">        until.tv_sec += 2;              /* 마감 시각 = 지금 + 2초 */</span>
+<span class="ln">        if (sem_timedwait(&amp;s-&gt;lock, &amp;until) == -1) {</span>
+<span class="ln">            perror(&quot;잠글 수 없다: sem_timedwait&quot;);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">        s-&gt;count++;</span>
+<span class="ln">        sem_post(&amp;s-&gt;lock);</span>
+<span class="ln">        printf(&quot;[%d] 잠그고 한 번 올림 → count = %ld\n&quot;, (int)getpid(), s-&gt;count);</span>
+<span class="ln">    } else if (!strcmp(cmd, &quot;value&quot;) &amp;&amp; argc == 2) {</span>
+<span class="ln">        int v;</span>
+<span class="ln">        sem_getvalue(&amp;s-&gt;lock, &amp;v);</span>
+<span class="ln">        printf(&quot;세마포어 값 = %d (%s)\n&quot;, v, v &gt; 0 ? &quot;열림&quot; : &quot;잠김&quot;);</span>
+<span class="ln">    } else {</span>
+<span class="ln">        fprintf(stderr, &quot;사용법: %s add N | hold SEC | try | value\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+    <details class="source">
+      <summary>counter.h <span class="muted">36줄</span></summary>
+      <pre class="code"><code><span class="ln">/* counter.h — shmrace와 semcount가 함께 쓰는 공유 메모리의 모양 */</span>
+<span class="ln">#ifndef COUNTER_H</span>
+<span class="ln">#define COUNTER_H</span>
+<span class="ln"> </span>
+<span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;semaphore.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;sys/mman.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">#define SHM_NAME &quot;/w13_counter&quot;</span>
+<span class="ln"> </span>
+<span class="ln">struct shared {                 /* 공유 메모리의 맨 앞에 이 구조체가 놓인다 */</span>
+<span class="ln">    sem_t lock;                 /* 2부에서 쓴다: 이진 세마포어 (1 = 열림) */</span>
+<span class="ln">    volatile long count;        /* 여러 프로세스가 함께 올리는 값 */</span>
+<span class="ln">};</span>
+<span class="ln"> </span>
+<span class="ln">/* 이름으로 열어 내 주소 공간에 붙인다. create이면 만들고 크기를 정한다 */</span>
+<span class="ln">static inline struct shared *attach(int create)</span>
+<span class="ln">{</span>
+<span class="ln">    int flags = create ? O_CREAT | O_EXCL | O_RDWR : O_RDWR;</span>
+<span class="ln">    int fd = shm_open(SHM_NAME, flags, 0600);</span>
+<span class="ln">    if (fd == -1) { perror(&quot;shm_open&quot;); exit(1); }</span>
+<span class="ln">    if (create &amp;&amp; ftruncate(fd, sizeof(struct shared)) == -1) {</span>
+<span class="ln">        perror(&quot;ftruncate&quot;);</span>
+<span class="ln">        exit(1);</span>
+<span class="ln">    }</span>
+<span class="ln">    struct shared *s = mmap(NULL, sizeof *s, PROT_READ | PROT_WRITE,</span>
+<span class="ln">                            MAP_SHARED, fd, 0);</span>
+<span class="ln">    if (s == MAP_FAILED) { perror(&quot;mmap&quot;); exit(1); }</span>
+<span class="ln">    close(fd);                  /* 매핑은 fd를 닫아도 남는다 */</span>
+<span class="ln">    return s;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">#endif</span></code></pre>
+    </details>
+  </section>
+  <nav class="pager">
+    <a href="shmrace.html">← shmrace</a>
+    <a href="ringbuf.html">ringbuf →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

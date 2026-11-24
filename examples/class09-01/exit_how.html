@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>exit_how — 시그널: 종료 상태·처리·관찰 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class09-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">9주차 1차시</a><span class="sep">/</span><span>exit_how</span></nav>
+  <header>
+    <h1>exit_how</h1>
+    <p>자식을 exit·abort·SIGSEGV·SIGTERM 등으로 끝내고 부모가 waitpid의 status를 WIFEXITED/WIFSIGNALED/WIFSTOPPED/WIFCONTINUED로 해석해 raw 값과 함께 출력한다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class09-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./exit_how exit; ./exit_how term" title="터미널에서 실행" aria-label="실행: ./exit_how exit; ./exit_how term">▶</button><code>./exit_how exit; ./exit_how term</code></div>
+          <p>정상 종료는 status=3, raw 0x0300 / SIGTERM은 signal 15, raw 0x000f</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./exit_how abort; ./exit_how segv" title="터미널에서 실행" aria-label="실행: ./exit_how abort; ./exit_how segv">▶</button><code>./exit_how abort; ./exit_how segv</code></div>
+          <p>SIGABRT(6)·SIGSEGV(11)로 종료된 자식의 raw status</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="(ulimit -c unlimited; ./exit_how abort); ls -l core* 2&gt;/dev/null; rm -f core*" title="터미널에서 실행" aria-label="실행: (ulimit -c unlimited; ./exit_how abort); ls -l core* 2&gt;/dev/null; rm -f core*">▶</button><code>(ulimit -c unlimited; ./exit_how abort); ls -l core* 2&gt;/dev/null; rm -f core*</code></div>
+          <p>코어 한계를 풀면 ', core dumped'와 raw 0x0086(0x80 비트)이 보이는지 확인</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./exit_how wait &gt; wait.log &amp; sleep 1; cat wait.log" title="터미널에서 실행" aria-label="실행: ./exit_how wait &gt; wait.log &amp; sleep 1; cat wait.log">▶</button><code>./exit_how wait &gt; wait.log &amp; sleep 1; cat wait.log</code></div>
+          <p>wait 모드: 자식이 외부 시그널을 기다린다(자식 PID 출력)</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="c=$(sed -n 's/^child=\([0-9]*\) .*/\1/p' wait.log); kill -STOP $c; sleep 1; kill -CONT $c; sleep 1; kill -KILL $c; wait" title="터미널에서 실행" aria-label="실행: c=$(sed -n 's/^child=\([0-9]*\) .*/\1/p' wait.log); kill -STOP $c; sleep 1; kill -CONT $c; sleep 1; kill -KILL $c; wait">▶</button><code>c=$(sed -n 's/^child=\([0-9]*\) .*/\1/p' wait.log); kill -STOP $c; sleep 1; kill -CONT $c; sleep 1; kill -KILL $c; wait</code></div>
+          <p>자식에게 STOP → CONT → KILL을 차례로 보낸다</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="cat wait.log; rm -f wait.log" title="터미널에서 실행" aria-label="실행: cat wait.log; rm -f wait.log">▶</button><code>cat wait.log; rm -f wait.log</code></div>
+          <p>stopped by signal 19 → continued → killed by signal 9 (raw 0x0009) 순서로 보고</p>
+        </li>
+      </ol>
+      <p class="callout">기본 코어 한계(ulimit -c)가 0이면 abort·segv에 'core dumped'가 붙지 않고 raw가 0x0006·0x000b로 나온다. 코어 파일 생성 여부는 게스트 커널 설정(core_pattern, CONFIG_COREDUMP)에 따라 다르다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>exit_how.c <span class="muted">85줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;signal.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;sys/wait.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* 자식이 어떻게 끝났는지 부모가 종료 상태(status)로 읽는다.</span>
+<span class="ln">   exit : 종료 코드 3으로 정상 종료      abort: abort()로 SIGABRT</span>
+<span class="ln">   segv : 널 포인터에 써서 SIGSEGV        term : raise(SIGTERM)</span>
+<span class="ln">   wait : 외부에서 kill로 보낸 시그널을 기다린다(STOP·CONT도 보고).</span>
+<span class="ln">   fork·waitpid의 정식 계약은 10주차에서 다룬다. 여기서는 관찰 도구다. */</span>
+<span class="ln"> </span>
+<span class="ln">static void child_action(const char *mode)</span>
+<span class="ln">{</span>
+<span class="ln">    if (strcmp(mode, &quot;exit&quot;) == 0)</span>
+<span class="ln">        _exit(3);</span>
+<span class="ln">    if (strcmp(mode, &quot;abort&quot;) == 0)</span>
+<span class="ln">        abort();</span>
+<span class="ln">    if (strcmp(mode, &quot;segv&quot;) == 0) {</span>
+<span class="ln">        volatile int *p = NULL;</span>
+<span class="ln">        *p = 1;                 /* 커널이 SIGSEGV를 보낸다 */</span>
+<span class="ln">    }</span>
+<span class="ln">    if (strcmp(mode, &quot;term&quot;) == 0)</span>
+<span class="ln">        raise(SIGTERM);</span>
+<span class="ln">    if (strcmp(mode, &quot;wait&quot;) == 0) {</span>
+<span class="ln">        printf(&quot;child=%ld waiting: kill -SIGNAL %ld\n&quot;,</span>
+<span class="ln">               (long)getpid(), (long)getpid());</span>
+<span class="ln">        fflush(stdout);</span>
+<span class="ln">        for (;;)</span>
+<span class="ln">            pause();</span>
+<span class="ln">    }</span>
+<span class="ln">    _exit(0);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int report(pid_t child, int status)</span>
+<span class="ln">{</span>
+<span class="ln">    if (WIFEXITED(status)) {</span>
+<span class="ln">        printf(&quot;child=%ld exited, status=%d\n&quot;,</span>
+<span class="ln">               (long)child, WEXITSTATUS(status));</span>
+<span class="ln">    } else if (WIFSIGNALED(status)) {</span>
+<span class="ln">        int sig = WTERMSIG(status);</span>
+<span class="ln">        printf(&quot;child=%ld killed by signal %d (%s)%s\n&quot;, (long)child,</span>
+<span class="ln">               sig, strsignal(sig), WCOREDUMP(status) ? &quot;, core dumped&quot; : &quot;&quot;);</span>
+<span class="ln">    } else if (WIFSTOPPED(status)) {</span>
+<span class="ln">        int sig = WSTOPSIG(status);</span>
+<span class="ln">        printf(&quot;child=%ld stopped by signal %d (%s)\n&quot;,</span>
+<span class="ln">               (long)child, sig, strsignal(sig));</span>
+<span class="ln">    } else if (WIFCONTINUED(status)) {</span>
+<span class="ln">        printf(&quot;child=%ld continued\n&quot;, (long)child);</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;  raw status=0x%04x\n&quot;, (unsigned)status);</span>
+<span class="ln">    fflush(stdout);</span>
+<span class="ln">    return WIFEXITED(status) || WIFSIGNALED(status);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    const char *modes[] = {&quot;exit&quot;, &quot;abort&quot;, &quot;segv&quot;, &quot;term&quot;, &quot;wait&quot;};</span>
+<span class="ln">    int ok = 0;</span>
+<span class="ln">    for (size_t i = 0; argc == 2 &amp;&amp; i &lt; sizeof modes / sizeof modes[0]; i++)</span>
+<span class="ln">        if (strcmp(argv[1], modes[i]) == 0)</span>
+<span class="ln">            ok = 1;</span>
+<span class="ln">    if (!ok) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s exit|abort|segv|term|wait\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    fflush(stdout);</span>
+<span class="ln">    pid_t child = fork();</span>
+<span class="ln">    if (child == -1) {</span>
+<span class="ln">        perror(&quot;fork&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (child == 0)</span>
+<span class="ln">        child_action(argv[1]);</span>
+<span class="ln">    for (;;) {</span>
+<span class="ln">        int status;</span>
+<span class="ln">        if (waitpid(child, &amp;status, WUNTRACED | WCONTINUED) == -1) {</span>
+<span class="ln">            perror(&quot;waitpid&quot;);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">        if (report(child, status))</span>
+<span class="ln">            return 0;</span>
+<span class="ln">    }</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <span></span>
+    <a href="catch_int.html">catch_int →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

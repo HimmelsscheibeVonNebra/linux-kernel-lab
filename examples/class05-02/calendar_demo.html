@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>calendar_demo — 시간과 시계 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class05-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">5주차 2차시</a><span class="sep">/</span><span>calendar_demo</span></nav>
+  <header>
+    <h1>calendar_demo</h1>
+    <p>time(2)으로 에포크 초를 얻어 localtime·gmtime·strftime으로 문자열로 바꾸고, 약 1.2초 뒤 다시 읽어 difftime을 출력합니다. TZ 환경변수가 local 문자열을 바꿉니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class05-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./calendar_demo" title="터미널에서 실행" aria-label="실행: ./calendar_demo">▶</button><code>./calendar_demo</code></div>
+          <p>epoch, local, utc가 나오고 약 1.2초 뒤 difftime(1.0 또는 2.0)이 출력됩니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="TZ=KST-9 ./calendar_demo" title="터미널에서 실행" aria-label="실행: TZ=KST-9 ./calendar_demo">▶</button><code>TZ=KST-9 ./calendar_demo</code></div>
+          <p>local이 utc보다 정확히 9시간 앞서는지 확인합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="TZ=UTC0 ./calendar_demo" title="터미널에서 실행" aria-label="실행: TZ=UTC0 ./calendar_demo">▶</button><code>TZ=UTC0 ./calendar_demo</code></div>
+          <p>TZ를 UTC로 바꾸면 local과 utc의 시각이 같아집니다. epoch는 TZ와 무관합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="date +%s; date; date -u" title="터미널에서 실행" aria-label="실행: date +%s; date; date -u">▶</button><code>date +%s; date; date -u</code></div>
+          <p>epoch 값과 date 명령의 결과를 교차 확인합니다.</p>
+        </li>
+      </ol>
+      <p class="callout">각 실행은 1.2초 동안 바쁜 대기를 합니다. 게스트에 zoneinfo 파일이 없을 수 있어 README의 TZ=Asia/Seoul 대신 POSIX 형식(KST-9, UTC0)을 사용했습니다. 32비트라 time_t와 long이 4바이트이며, 대기 루프의 나노초 계산은 경과가 2초 미만일 때만 long 범위에 들어갑니다(VM이 오래 멈추면 대기가 몇 초 길어질 수 있음).</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>calendar_demo.c <span class="muted">68줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;time.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* 달력 시간의 기본 흐름: time(2)으로 초를 얻고</span>
+<span class="ln">   localtime·gmtime으로 struct tm을 만들어 strftime으로 문자열로 바꾼다. */</span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc != 1) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    time_t now = time(NULL);</span>
+<span class="ln">    if (now == (time_t)-1) {</span>
+<span class="ln">        perror(&quot;time&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;epoch=%lld\n&quot;, (long long)now);</span>
+<span class="ln"> </span>
+<span class="ln">    char buf[64];</span>
+<span class="ln">    struct tm *tm_local = localtime(&amp;now);</span>
+<span class="ln">    if (tm_local == NULL) {</span>
+<span class="ln">        perror(&quot;localtime&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (strftime(buf, sizeof buf, &quot;%Y-%m-%d %H:%M:%S %Z&quot;, tm_local) == 0) {</span>
+<span class="ln">        fprintf(stderr, &quot;strftime: buffer too small\n&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;local=%s\n&quot;, buf);</span>
+<span class="ln"> </span>
+<span class="ln">    struct tm *tm_utc = gmtime(&amp;now);</span>
+<span class="ln">    if (tm_utc == NULL) {</span>
+<span class="ln">        perror(&quot;gmtime&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (strftime(buf, sizeof buf, &quot;%Y-%m-%d %H:%M:%S UTC&quot;, tm_utc) == 0) {</span>
+<span class="ln">        fprintf(stderr, &quot;strftime: buffer too small\n&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;utc=%s\n&quot;, buf);</span>
+<span class="ln"> </span>
+<span class="ln">    /* difftime은 time_t끼리의 차를 초 단위 실수로 돌려준다.</span>
+<span class="ln">       time(2)는 초 단위 해상도이므로 1.2초를 기다려 차이를 만든다. */</span>
+<span class="ln">    struct timespec start, tick;</span>
+<span class="ln">    if (clock_gettime(CLOCK_MONOTONIC, &amp;start) == -1) {</span>
+<span class="ln">        perror(&quot;clock_gettime&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    do {</span>
+<span class="ln">        if (clock_gettime(CLOCK_MONOTONIC, &amp;tick) == -1) {</span>
+<span class="ln">            perror(&quot;clock_gettime&quot;);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">    } while ((tick.tv_sec - start.tv_sec) * 1000000000L</span>
+<span class="ln">             + (tick.tv_nsec - start.tv_nsec) &lt; 1200000000L);</span>
+<span class="ln">    time_t later = time(NULL);</span>
+<span class="ln">    if (later == (time_t)-1) {</span>
+<span class="ln">        perror(&quot;time&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;difftime=%.1fs\n&quot;, difftime(later, now));</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <span></span>
+    <a href="tm_normalize.html">tm_normalize →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

@@ -1,0 +1,97 @@
+{
+  "class": "class04-01",
+  "title": "리눅스 파일과 디렉토리",
+  "summary": "lstat으로 파일 종류·inode·링크 수를 조회하고, mkdir·opendir/readdir·chdir·rmdir로 디렉토리를 다루는 예제입니다.",
+  "examples": [
+    {
+      "name": "mystat",
+      "source": "mystat.c",
+      "summary": "lstat(2)으로 경로의 종류, device, inode, 링크 수, 권한, 소유자, 크기를 출력합니다. 마지막 심볼릭 링크는 따라가지 않습니다.",
+      "steps": [
+        { "cmd": "rm -rf mystat_lab && mkdir mystat_lab && printf 'hello\\n' > mystat_lab/a.txt", "note": "실습용 디렉토리와 6바이트 일반 파일을 준비합니다." },
+        { "cmd": "./mystat mystat_lab/a.txt", "note": "type=regular, links=1, size=6을 확인합니다." },
+        { "cmd": "ln mystat_lab/a.txt mystat_lab/hard.txt && ln -s a.txt mystat_lab/soft.txt", "note": "하드 링크와 심볼릭 링크를 하나씩 만듭니다." },
+        { "cmd": "./mystat mystat_lab/hard.txt", "note": "a.txt와 inode가 같고 links=2로 늘었는지 봅니다." },
+        { "cmd": "./mystat mystat_lab/soft.txt", "note": "type=symlink이고 size는 저장된 문자열 'a.txt'의 길이 5입니다." },
+        { "cmd": "./mystat mystat_lab/missing; echo \"status=$?\"", "note": "없는 경로는 perror 메시지와 종료 상태 1로 실패합니다." }
+      ],
+      "manual": false,
+      "expect": "type=symlink",
+      "notes": "이 수업의 Makefile은 _FILE_OFFSET_BITS=64를 정의하지 않으므로 32비트에서 2GB 이상 파일이나 32비트를 넘는 inode 번호는 EOVERFLOW로 실패할 수 있습니다. tmpfs의 작은 파일에서는 문제가 없습니다."
+    },
+    {
+      "name": "mini_ls",
+      "source": "mini_ls.c",
+      "summary": "opendir/readdir로 디렉토리 항목을 읽고 fstatat(AT_SYMLINK_NOFOLLOW)으로 각 항목의 '종류 inode 크기 이름'을 출력하는 간단한 ls입니다.",
+      "steps": [
+        { "cmd": "rm -rf minils_lab && mkdir -p minils_lab/sub && printf 'hello\\n' > minils_lab/a.txt && touch minils_lab/.hidden && ln -s a.txt minils_lab/soft", "note": "일반 파일, 숨김 파일, 하위 디렉토리, 심볼릭 링크를 준비합니다." },
+        { "cmd": "./mini_ls minils_lab", "note": "종류 문자(-, d, l), inode, 크기, 이름 순서입니다. 숨김 파일도 나오고 정렬은 하지 않습니다." },
+        { "cmd": "ls -lai minils_lab", "note": "ls의 inode·크기 열과 비교합니다. mini_ls는 . 과 .. 만 생략합니다." },
+        { "cmd": "./mini_ls minils_lab/a.txt; echo \"status=$?\"", "note": "디렉토리가 아닌 경로는 opendir가 ENOTDIR로 실패합니다(종료 상태 1)." },
+        { "cmd": "./mini_ls; echo \"status=$?\"", "note": "인자가 없으면 usage를 출력하고 종료 상태 2입니다." }
+      ],
+      "manual": false,
+      "expect": " 6 a.txt",
+      "notes": "_FILE_OFFSET_BITS=64 없이 빌드되어 32비트 범위를 넘는 inode·오프셋을 가진 파일시스템에서는 readdir/fstatat이 EOVERFLOW를 낼 수 있습니다. 이 환경의 tmpfs에서는 정상 동작합니다."
+    },
+    {
+      "name": "dir_create",
+      "source": "dir_create.c",
+      "summary": "mkdir(2)로 디렉토리를 하나 만듭니다. 요청 권한 0755에 umask가 적용되며, 이미 있거나 부모가 없으면 실패합니다.",
+      "steps": [
+        { "cmd": "rm -rf newdir absent", "note": "이전 실행의 흔적을 지웁니다." },
+        { "cmd": "./dir_create newdir", "note": "'created: newdir'가 출력됩니다." },
+        { "cmd": "ls -ld newdir", "note": "권한이 0755 & ~umask(보통 drwxr-xr-x)인지 확인합니다." },
+        { "cmd": "./dir_create newdir; echo \"status=$?\"", "note": "이미 있는 이름은 EEXIST(File exists)로 실패합니다." },
+        { "cmd": "./dir_create absent/child; echo \"status=$?\"", "note": "부모 디렉토리가 없으면 ENOENT로 실패합니다. 중간 경로를 자동으로 만들지 않습니다." },
+        { "cmd": "rmdir newdir", "note": "만든 디렉토리를 정리합니다." }
+      ],
+      "manual": false,
+      "expect": "created: newdir"
+    },
+    {
+      "name": "dir_list",
+      "source": "dir_list.c",
+      "summary": "opendir/readdir/closedir로 디렉토리의 이름 목록을 읽습니다. . 과 .. 도 출력하며, errno를 0으로 초기화해 끝과 오류를 구분합니다.",
+      "steps": [
+        { "cmd": "rm -rf dirlist_lab && mkdir -p dirlist_lab/sub && printf 'hello\\n' > dirlist_lab/a.txt && touch dirlist_lab/.hidden", "note": "파일, 숨김 파일, 하위 디렉토리를 준비합니다." },
+        { "cmd": "./dir_list dirlist_lab", "note": ". 과 .. , .hidden까지 모든 이름이 한 줄씩 나옵니다(순서는 정렬되지 않음)." },
+        { "cmd": "ls -a dirlist_lab", "note": "ls -a 결과와 같은 이름 집합인지 비교합니다." },
+        { "cmd": "./dir_list dirlist_lab/a.txt; echo \"status=$?\"", "note": "일반 파일은 ENOTDIR(Not a directory)로 실패합니다." },
+        { "cmd": "./dir_list dirlist_lab/missing; echo \"status=$?\"", "note": "없는 경로는 ENOENT로 실패합니다." }
+      ],
+      "manual": false,
+      "expect": ".hidden",
+      "notes": "_FILE_OFFSET_BITS=64 없이 빌드되어 d_ino/d_off가 32비트를 넘는 파일시스템에서는 readdir가 EOVERFLOW를 낼 수 있습니다. tmpfs에서는 문제가 없습니다."
+    },
+    {
+      "name": "dir_chdir",
+      "source": "dir_chdir.c",
+      "summary": "getcwd(3)로 현재 작업 디렉토리를 출력하고 chdir(2)로 옮긴 뒤 다시 출력합니다. 바뀌는 것은 이 프로세스의 위치뿐입니다.",
+      "steps": [
+        { "cmd": "mkdir -p chdir_child", "note": "이동할 대상 디렉토리를 준비합니다." },
+        { "cmd": "pwd", "note": "셸의 현재 위치를 기억해 둡니다." },
+        { "cmd": "./dir_chdir chdir_child", "note": "before는 셸의 위치, after는 그 아래 chdir_child의 절대 경로입니다." },
+        { "cmd": "pwd", "note": "부모 셸의 위치는 그대로입니다. chdir은 호출한 프로세스에만 적용됩니다." },
+        { "cmd": "./dir_chdir missing; echo \"status=$?\"", "note": "before만 출력된 뒤 ENOENT로 실패합니다(종료 상태 1)." },
+        { "cmd": "rmdir chdir_child", "note": "실습 디렉토리를 정리합니다." }
+      ],
+      "manual": false,
+      "expect": "after: /"
+    },
+    {
+      "name": "dir_remove",
+      "source": "dir_remove.c",
+      "summary": "rmdir(2)로 빈 디렉토리를 삭제합니다. 내용이 있는 디렉토리는 ENOTEMPTY로 실패하며 재귀 삭제는 하지 않습니다.",
+      "steps": [
+        { "cmd": "rm -rf rmdir_lab && mkdir rmdir_lab && printf 'keep me\\n' > rmdir_lab/keep.txt", "note": "파일이 하나 들어 있는 디렉토리를 준비합니다." },
+        { "cmd": "./dir_remove rmdir_lab; echo \"status=$?\"", "note": "비어 있지 않으므로 'Directory not empty'로 실패합니다." },
+        { "cmd": "cat rmdir_lab/keep.txt", "note": "실패한 뒤에도 안의 파일은 그대로 남아 있습니다." },
+        { "cmd": "rm rmdir_lab/keep.txt && ./dir_remove rmdir_lab", "note": "비운 뒤에는 'removed: rmdir_lab'가 출력됩니다." },
+        { "cmd": "./dir_remove rmdir_lab; echo \"status=$?\"", "note": "이미 지워진 이름은 ENOENT로 실패합니다." }
+      ],
+      "manual": false,
+      "expect": "removed: rmdir_lab"
+    }
+  ]
+}

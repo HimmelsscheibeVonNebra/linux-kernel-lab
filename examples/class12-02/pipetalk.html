@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pipetalk — 양방향 파이프 · 파이프라인 · FIFO 서버 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class12-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">12주차 2차시</a><span class="sep">/</span><span>pipetalk</span></nav>
+  <header>
+    <h1>pipetalk</h1>
+    <p>파이프 두 개로 부모와 자식이 묻고 답하는 규약(ask)과, 서로 기다리다 멈추는 교착 세 가지를 재현합니다: 둘 다 먼저 읽기(both), 답이 stdio 버퍼에 갇힘(mute), 두 파이프가 모두 가득 참(flood). fix는 쓰는 일을 다른 프로세스에 맡겨 flood를 해결합니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class12-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pipetalk ask" title="터미널에서 실행" aria-label="실행: ./pipetalk ask">▶</button><code>./pipetalk ask</code></div>
+          <p>질문 셋(1 2, 30 40, 500 600)에 답 3, 70, 1100이 차례로 오고, 부모가 닫으면 자식이 EOF를 받고 종료 코드 0으로 끝난다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="timeout 2 ./pipetalk both; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: timeout 2 ./pipetalk both; echo &quot;exit=$?&quot;">▶</button><code>timeout 2 ./pipetalk both; echo &quot;exit=$?&quot;</code></div>
+          <p>부모와 자식이 둘 다 먼저 read를 해서 영원히 기다린다. 2초 뒤 timeout이 끝낸다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="timeout 2 ./pipetalk mute; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: timeout 2 ./pipetalk mute; echo &quot;exit=$?&quot;">▶</button><code>timeout 2 ./pipetalk mute; echo &quot;exit=$?&quot;</code></div>
+          <p>자식이 fflush를 하지 않아 답이 stdio 버퍼에만 있고 파이프로 나가지 않는다. 첫 질문 뒤에 멈춘다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pipetalk flood 20000" title="터미널에서 실행" aria-label="실행: ./pipetalk flood 20000">▶</button><code>./pipetalk flood 20000</code></div>
+          <p>양이 적으면(파이프 용량 65536바이트 이하) 다 쓰고 나서 읽어도 문제없이 20000바이트를 돌려받는다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="timeout 3 ./pipetalk flood 1000000; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: timeout 3 ./pipetalk flood 1000000; echo &quot;exit=$?&quot;">▶</button><code>timeout 3 ./pipetalk flood 1000000; echo &quot;exit=$?&quot;</code></div>
+          <p>[보냄] 131072바이트에서 멈춘다. 두 파이프(65536 × 2)가 모두 가득 차 부모와 자식이 서로 write에서 잠든 교착이다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pipetalk fix 1000000" title="터미널에서 실행" aria-label="실행: ./pipetalk fix 1000000">▶</button><code>./pipetalk fix 1000000</code></div>
+          <p>쓰는 일을 둘째 자식에게 맡기고 부모는 동시에 읽으므로 1000000바이트를 모두 돌려받는다.</p>
+        </li>
+      </ol>
+      <p class="callout">both · mute · flood 1000000 은 스스로 끝나지 않는 것이 정상이라 timeout으로 끝냅니다 (BusyBox에서는 exit=143). 부모가 죽으면 자식은 EOF나 SIGPIPE를 받아 함께 끝나므로 남는 프로세스는 없습니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>pipetalk.c <span class="muted">170줄</span></summary>
+      <pre class="code"><code><span class="ln">/* pipetalk.c — 파이프 두 개로 부모와 자식이 묻고 답한다.</span>
+<span class="ln"> * 양방향 통신의 규약과, 서로 기다리다 멈추는 교착 세 가지를 확인한다.</span>
+<span class="ln"> * 사용법: ./pipetalk ask | both | mute | flood N | fix N</span>
+<span class="ln"> */</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;sys/wait.h&gt;               /* waitpid, WEXITSTATUS */</span>
+<span class="ln">#include &lt;unistd.h&gt;                 /* pipe, fork, read, write, close */</span>
+<span class="ln"> </span>
+<span class="ln">enum { CALC, CALC_MUTE, ECHO };     /* 자식이 맡을 역할 */</span>
+<span class="ln"> </span>
+<span class="ln">static void die(const char *what)   /* 실패한 호출 이름과 errno 메시지를 내고 끝낸다 */</span>
+<span class="ln">{</span>
+<span class="ln">    perror(what);</span>
+<span class="ln">    exit(1);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* 자식(계산): &quot;A B\n&quot;을 받을 때마다 합을 한 줄로 답한다. EOF면 끝낸다. */</span>
+<span class="ln">static void child_calc(int in, int out, int mute)</span>
+<span class="ln">{</span>
+<span class="ln">    char buf[64];                   /* 질문 한 줄 */</span>
+<span class="ln">    ssize_t n;                      /* read의 반환값 */</span>
+<span class="ln">    FILE *fp = fdopen(out, &quot;w&quot;);    /* 답은 stdio로 쓴다 (4주차) */</span>
+<span class="ln"> </span>
+<span class="ln">    if (fp == NULL)</span>
+<span class="ln">        die(&quot;fdopen&quot;);</span>
+<span class="ln">    while ((n = read(in, buf, sizeof buf - 1)) &gt; 0) {  /* 질문 하나가 read 한 번 */</span>
+<span class="ln">        int a, b;</span>
+<span class="ln">        buf[n] = '\0';              /* sscanf가 읽도록 문자열로 만든다 */</span>
+<span class="ln">        if (sscanf(buf, &quot;%d %d&quot;, &amp;a, &amp;b) != 2)</span>
+<span class="ln">            continue;               /* 형식이 틀린 줄은 버린다 */</span>
+<span class="ln">        fprintf(fp, &quot;%d\n&quot;, a + b); /* 아직 fp의 버퍼 안에만 있다 */</span>
+<span class="ln">        if (!mute)                  /* mute 모드는 다음 줄만 건너뛴다 */</span>
+<span class="ln">            fflush(fp);             /* 버퍼를 비워야 파이프로 나간다 */</span>
+<span class="ln">    }</span>
+<span class="ln">    fclose(fp);                     /* 남은 버퍼를 비우고 out을 닫는다 */</span>
+<span class="ln">    exit(0);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* 자식(메아리): 받은 바이트를 그대로 돌려보낸다. cat과 같다. */</span>
+<span class="ln">static void child_echo(int in, int out)</span>
+<span class="ln">{</span>
+<span class="ln">    char buf[4096];                 /* 한 번에 옮길 덩어리 */</span>
+<span class="ln">    ssize_t n;</span>
+<span class="ln"> </span>
+<span class="ln">    while ((n = read(in, buf, sizeof buf)) &gt; 0)</span>
+<span class="ln">        if (write(out, buf, (size_t)n) == -1)   /* rep가 가득 차면 여기서 잠든다 */</span>
+<span class="ln">            die(&quot;write&quot;);</span>
+<span class="ln">    exit(0);                        /* EOF: 끝점은 종료하면서 닫힌다 */</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* 파이프 둘을 만들고 자식을 띄운다. 부모가 쓸 끝점 둘을 돌려준다. */</span>
+<span class="ln">static pid_t spawn(int role, int *to_child, int *from_child)</span>
+<span class="ln">{</span>
+<span class="ln">    int req[2], rep[2];             /* req: 부모 → 자식, rep: 자식 → 부모 */</span>
+<span class="ln"> </span>
+<span class="ln">    if (pipe(req) == -1 || pipe(rep) == -1)</span>
+<span class="ln">        die(&quot;pipe&quot;);</span>
+<span class="ln">    pid_t pid = fork();             /* 끝점 넷이 여덟이 된다 */</span>
+<span class="ln">    if (pid == -1)</span>
+<span class="ln">        die(&quot;fork&quot;);</span>
+<span class="ln">    if (pid == 0) {</span>
+<span class="ln">        close(req[1]);              /* 자식 ①: req의 쓰기 끝 */</span>
+<span class="ln">        close(rep[0]);              /* 자식 ②: rep의 읽기 끝 */</span>
+<span class="ln">        if (role == ECHO)</span>
+<span class="ln">            child_echo(req[0], rep[1]);</span>
+<span class="ln">        child_calc(req[0], rep[1], role == CALC_MUTE);</span>
+<span class="ln">    }</span>
+<span class="ln">    close(req[0]);                  /* 부모 ①: req의 읽기 끝 */</span>
+<span class="ln">    close(rep[1]);                  /* 부모 ②: rep의 쓰기 끝 */</span>
+<span class="ln">    *to_child = req[1];</span>
+<span class="ln">    *from_child = rep[0];</span>
+<span class="ln">    return pid;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* ask · both · mute: 질문 셋을 차례로 보내고 답을 받는다. */</span>
+<span class="ln">static int run_ask(int role, int read_first)</span>
+<span class="ln">{</span>
+<span class="ln">    const char *q[] = { &quot;1 2\n&quot;, &quot;30 40\n&quot;, &quot;500 600\n&quot; };</span>
+<span class="ln">    char buf[64];</span>
+<span class="ln">    ssize_t n;</span>
+<span class="ln">    int to, from;                   /* 부모의 쓰기 끝, 읽기 끝 */</span>
+<span class="ln">    pid_t pid = spawn(role, &amp;to, &amp;from);</span>
+<span class="ln"> </span>
+<span class="ln">    if (read_first) {               /* both: 묻기 전에 답부터 기다린다 */</span>
+<span class="ln">        printf(&quot;[부모] 먼저 읽는다 (자식도 읽는 중)\n&quot;);</span>
+<span class="ln">        fflush(stdout);</span>
+<span class="ln">        n = read(from, buf, sizeof buf);        /* 영원히 돌아오지 않는다 */</span>
+<span class="ln">    }</span>
+<span class="ln">    for (int i = 0; i &lt; 3; i++) {</span>
+<span class="ln">        if (write(to, q[i], strlen(q[i])) == -1)    /* 질문 하나 = write 한 번 */</span>
+<span class="ln">            die(&quot;write&quot;);</span>
+<span class="ln">        printf(&quot;[부모] 질문: %s&quot;, q[i]);</span>
+<span class="ln">        n = read(from, buf, sizeof buf);        /* 답이 올 때까지 잠든다 */</span>
+<span class="ln">        if (n &lt;= 0)</span>
+<span class="ln">            die(&quot;read&quot;);</span>
+<span class="ln">        printf(&quot;[부모] 답:   %.*s&quot;, (int)n, buf);</span>
+<span class="ln">    }</span>
+<span class="ln">    close(to);                      /* 더 물을 것이 없다 → 자식이 EOF를 받는다 */</span>
+<span class="ln">    close(from);</span>
+<span class="ln">    int st;</span>
+<span class="ln">    waitpid(pid, &amp;st, 0);</span>
+<span class="ln">    printf(&quot;[부모] 자식 종료 코드 %d\n&quot;, WEXITSTATUS(st));</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* 쓰기 끝에 total바이트를 4096씩 보낸다. 32768바이트마다 진행을 알린다. */</span>
+<span class="ln">static void send_all(int to, long total)</span>
+<span class="ln">{</span>
+<span class="ln">    char block[4096];</span>
+<span class="ln">    memset(block, 'x', sizeof block);</span>
+<span class="ln">    for (long sent = 0; sent &lt; total; ) {</span>
+<span class="ln">        size_t len = total - sent &lt; 4096 ? (size_t)(total - sent) : 4096;</span>
+<span class="ln">        if (write(to, block, len) == -1)        /* req가 가득 차면 여기서 잠든다 */</span>
+<span class="ln">            die(&quot;write&quot;);</span>
+<span class="ln">        sent += (long)len;</span>
+<span class="ln">        if (sent % 32768 == 0 || sent == total)</span>
+<span class="ln">            fprintf(stderr, &quot;[보냄] %ld바이트\n&quot;, sent);</span>
+<span class="ln">    }</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* flood · fix: N바이트를 메아리 자식에게 보내고 모두 돌려받는다. */</span>
+<span class="ln">static int run_flood(long total, int fix)</span>
+<span class="ln">{</span>
+<span class="ln">    char buf[4096];</span>
+<span class="ln">    long got = 0;                   /* 돌려받은 바이트 수 */</span>
+<span class="ln">    ssize_t n;</span>
+<span class="ln">    int to, from;</span>
+<span class="ln">    pid_t pid = spawn(ECHO, &amp;to, &amp;from);</span>
+<span class="ln">    pid_t writer = -1;              /* fix에서만 쓰는 둘째 자식 */</span>
+<span class="ln"> </span>
+<span class="ln">    if (fix) {                      /* fix: 쓰는 일을 다른 프로세스에 맡긴다 */</span>
+<span class="ln">        writer = fork();</span>
+<span class="ln">        if (writer == -1)</span>
+<span class="ln">            die(&quot;fork&quot;);</span>
+<span class="ln">        if (writer == 0) {</span>
+<span class="ln">            close(from);            /* 쓰는 자식은 읽지 않는다 */</span>
+<span class="ln">            send_all(to, total);</span>
+<span class="ln">            exit(0);                /* to가 닫힌다 */</span>
+<span class="ln">        }</span>
+<span class="ln">    } else {</span>
+<span class="ln">        send_all(to, total);        /* flood: 다 쓴 뒤에야 읽으러 간다 */</span>
+<span class="ln">    }</span>
+<span class="ln">    close(to);                      /* 부모의 쓰기 끝: 닫아야 메아리가 EOF를 받는다 */</span>
+<span class="ln">    while ((n = read(from, buf, sizeof buf)) &gt; 0)   /* 쓰는 동안에도 읽는다 (fix) */</span>
+<span class="ln">        got += n;</span>
+<span class="ln">    printf(&quot;[부모] 돌려받은 양 = %ld바이트\n&quot;, got);</span>
+<span class="ln">    close(from);</span>
+<span class="ln">    waitpid(pid, NULL, 0);</span>
+<span class="ln">    if (fix)</span>
+<span class="ln">        waitpid(writer, NULL, 0);</span>
+<span class="ln">    return got == total ? 0 : 1;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc == 2 &amp;&amp; strcmp(argv[1], &quot;ask&quot;) == 0)</span>
+<span class="ln">        return run_ask(CALC, 0);</span>
+<span class="ln">    if (argc == 2 &amp;&amp; strcmp(argv[1], &quot;both&quot;) == 0)</span>
+<span class="ln">        return run_ask(CALC, 1);</span>
+<span class="ln">    if (argc == 2 &amp;&amp; strcmp(argv[1], &quot;mute&quot;) == 0)</span>
+<span class="ln">        return run_ask(CALC_MUTE, 0);</span>
+<span class="ln">    if (argc == 3 &amp;&amp; strcmp(argv[1], &quot;flood&quot;) == 0)</span>
+<span class="ln">        return run_flood(atol(argv[2]), 0);</span>
+<span class="ln">    if (argc == 3 &amp;&amp; strcmp(argv[1], &quot;fix&quot;) == 0)</span>
+<span class="ln">        return run_flood(atol(argv[2]), 1);</span>
+<span class="ln">    fprintf(stderr, &quot;사용법: %s ask | both | mute | flood N | fix N\n&quot;, argv[0]);</span>
+<span class="ln">    return 2;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="pipe_two.html">← pipe_two</a>
+    <a href="pipeline.html">pipeline →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

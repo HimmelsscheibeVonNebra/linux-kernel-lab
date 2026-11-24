@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>read_chunks — 견고한 I/O와 파일 복사 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class03-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">3주차 2차시</a><span class="sep">/</span><span>read_chunks</span></nav>
+  <header>
+    <h1>read_chunks</h1>
+    <p>4바이트 버퍼로 read를 반복하며 반환값을 stderr에, 읽은 데이터를 stdout에 내보낸다. 짧은 read와 EOF(0)를 구별해 본다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class03-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="printf ABCDEFGHIJ &gt; in.txt; ./read_chunks in.txt; echo" title="터미널에서 실행" aria-label="실행: printf ABCDEFGHIJ &gt; in.txt; ./read_chunks in.txt; echo">▶</button><code>printf ABCDEFGHIJ &gt; in.txt; ./read_chunks in.txt; echo</code></div>
+          <p>read 반환값 4, 4, 2, 0과 데이터 조각이 번갈아 나온다. 2도 성공이고 0이 EOF다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./read_chunks in.txt &gt; out.txt; wc -c in.txt out.txt" title="터미널에서 실행" aria-label="실행: ./read_chunks in.txt &gt; out.txt; wc -c in.txt out.txt">▶</button><code>./read_chunks in.txt &gt; out.txt; wc -c in.txt out.txt</code></div>
+          <p>stdout만 파일로 보내면 진단 메시지는 화면에 남고 데이터 10바이트만 복사된다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd=": &gt; empty.txt; ./read_chunks empty.txt; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: : &gt; empty.txt; ./read_chunks empty.txt; echo &quot;exit=$?&quot;">▶</button><code>: &gt; empty.txt; ./read_chunks empty.txt; echo &quot;exit=$?&quot;</code></div>
+          <p>빈 파일은 첫 read가 바로 0을 반환한다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./read_chunks in.txt &gt; /dev/full; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./read_chunks in.txt &gt; /dev/full; echo &quot;exit=$?&quot;">▶</button><code>./read_chunks in.txt &gt; /dev/full; echo &quot;exit=$?&quot;</code></div>
+          <p>/dev/full에 쓰면 ENOSPC가 발생해 write 오류 메시지와 종료 상태 1이 나온다.</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>read_chunks.c <span class="muted">29줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln">#include &quot;io_helpers.h&quot;</span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc != 2) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s INPUT\n&quot;, argv[0]); return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    int fd = open(argv[1], O_RDONLY);</span>
+<span class="ln">    if (fd == -1) { perror(argv[1]); return 1; }</span>
+<span class="ln">    unsigned char buf[4];</span>
+<span class="ln">    int status = 0;</span>
+<span class="ln">    for (;;) {</span>
+<span class="ln">        ssize_t n = read(fd, buf, sizeof buf);</span>
+<span class="ln">        if (n == -1) {</span>
+<span class="ln">            if (errno == EINTR) continue;</span>
+<span class="ln">            perror(&quot;read&quot;); status = 1; break;</span>
+<span class="ln">        }</span>
+<span class="ln">        fprintf(stderr, &quot;read returned %zd\n&quot;, n);</span>
+<span class="ln">        if (n == 0) break;</span>
+<span class="ln">        if (write_all(STDOUT_FILENO, buf, (size_t)n) == -1) {</span>
+<span class="ln">            perror(&quot;write&quot;); status = 1; break;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    if (close(fd) == -1) { perror(&quot;close&quot;); status = 1; }</span>
+<span class="ln">    return status;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+    <details class="source">
+      <summary>io_helpers.h <span class="muted">22줄</span></summary>
+      <pre class="code"><code><span class="ln">#ifndef IO_HELPERS_H</span>
+<span class="ln">#define IO_HELPERS_H</span>
+<span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;stddef.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln">/* Blocking descriptors. Retry interruptions and advance after partial writes. */</span>
+<span class="ln">static int write_all(int fd, const void *data, size_t count)</span>
+<span class="ln">{</span>
+<span class="ln">    const unsigned char *p = data;</span>
+<span class="ln">    while (count &gt; 0) {</span>
+<span class="ln">        ssize_t n = write(fd, p, count);</span>
+<span class="ln">        if (n == -1) {</span>
+<span class="ln">            if (errno == EINTR) continue;</span>
+<span class="ln">            return -1;</span>
+<span class="ln">        }</span>
+<span class="ln">        if (n == 0) { errno = EIO; return -1; }</span>
+<span class="ln">        p += (size_t)n;</span>
+<span class="ln">        count -= (size_t)n;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln">#endif</span></code></pre>
+    </details>
+  </section>
+  <nav class="pager">
+    <a href="file_copy.html">← file_copy</a>
+    <a href="test_write_all.html">test_write_all →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

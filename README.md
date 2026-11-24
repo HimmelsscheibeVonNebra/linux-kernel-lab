@@ -1,0 +1,117 @@
+# Linux Lab
+
+웹브라우저에서 32비트 x86 Linux를 부팅해 시스템 프로그래밍 예제와 커널 모듈을 실행하는 교육용 실습 환경입니다.
+[v86](https://github.com/copy/v86) 에뮬레이터 위에서 [Buildroot](https://buildroot.org/)로 만든 커널과 initramfs를 실행하며, 정적 파일만으로 동작하므로 GitHub Pages에 그대로 배포됩니다.
+
+- **시스템 프로그래밍 예제** — [2026_SystemProgramming](https://github.com/HimmelsscheibeVonNebra/2026_SystemProgramming) 강의의 C 예제마다 페이지가 하나씩 있습니다. 페이지를 열면 그 수업 디렉터리에서 `student` 사용자 셸이 뜨고, 컴파일된 실행 파일과 소스가 들어 있습니다. 실행 순서의 ▶ 버튼을 누르면 명령이 터미널에 입력됩니다.
+- **커널 모듈 실습** — `kernel.html`. root 셸에서 `insmod` / `rmmod` / `dmesg`, procfs, sysfs, 문자 디바이스를 실습합니다.
+
+## 구성
+
+```text
+index.html, kernel.html, examples/   생성된 페이지 (scripts/gen-pages.mjs 출력)
+css/, js/lab.js                      스타일과 공용 스크립트 (v86 + xterm.js 연결)
+build/, bios/, vendor/xterm/         v86, SeaBIOS/VGA BIOS, xterm.js
+images/                              bzImage, rootfs.cpio.gz (빌드 결과물)
+
+sysprog/                             강의 예제 소스 (.c, .h, Makefile) 사본
+examples-meta/                       예제별 설명과 실행 순서 (수업당 JSON 하나)
+exercises/                           커널 모듈 소스 (01~04)
+buildroot-external/                  Buildroot 설정: 커널 설정, rootfs overlay, 패키지
+docker/, scripts/                    이미지 빌드 환경, 빌드·페이지 생성 스크립트
+tests/                               Node.js 헤드리스 테스트
+```
+
+## 로컬 실행
+
+```bash
+python3 -m http.server 8000
+# 브라우저에서 http://localhost:8000
+```
+
+`file://`로 직접 열면 WASM과 이미지를 불러오지 못하므로 반드시 HTTP 서버로 엽니다.
+
+## 게스트 환경
+
+| 항목 | 값 |
+|---|---|
+| 커널 | Linux 6.12 (i686, 단일 CPU), 메모리 256 MB |
+| 사용자 공간 | glibc, BusyBox, strace |
+| 예제 페이지 | 사용자 `student` (uid 1000), `/home/student/<수업>/` |
+| 커널 실습 페이지 | `root`, 모듈 `/root/*.ko`, 소스 `/root/src` |
+| 파일 올리기 | 페이지에서 올린 파일이 `/mnt/host` (9p)에 나타남 |
+
+게스트에는 컴파일러가 없습니다. 예제는 이미지 빌드 때 각 수업의 `Makefile`로 미리 컴파일됩니다.
+
+## 예제 추가·수정
+
+1. 강의 저장소의 소스를 `sysprog/`로 다시 가져옵니다.
+
+   ```bash
+   rsync -a --prune-empty-dirs --exclude '*.dSYM/' --exclude 'student/' \
+     --include '*/' --include '*.c' --include '*.h' --include 'Makefile' --exclude '*' \
+     ../2026_SystemProgramming/Codes/ sysprog/
+   ```
+
+2. `examples-meta/<수업>.json`에 예제의 설명과 실행 순서를 적습니다.
+
+   ```json
+   {
+     "name": "file_create",
+     "source": "file_create.c",
+     "summary": "예제가 보여 주는 것",
+     "steps": [{ "cmd": "./file_create hello.txt", "note": "관찰할 것" }],
+     "manual": false,
+     "expect": "출력에 반드시 나와야 하는 문자열 (테스트용, 선택)",
+     "notes": "주의 사항 (선택)"
+   }
+   ```
+
+   `manual: true`는 키 입력이 필요한 예제로, 자동 테스트에서 실행하지 않습니다.
+
+3. 이미지와 페이지를 다시 만들고 테스트합니다.
+
+   ```bash
+   scripts/build-images.sh modules
+   node scripts/gen-pages.mjs
+   node tests/examples-test.mjs
+   ```
+
+## 이미지 빌드
+
+Docker가 있는 Linux에서 실행합니다. 호스트에 다른 패키지를 설치할 필요는 없습니다.
+
+```bash
+scripts/build-images.sh            # 전체 빌드 (처음 한 번: 툴체인 + 커널)
+scripts/build-images.sh modules    # exercises/, sysprog/ 수정 후 해당 부분과 rootfs만
+```
+
+- Buildroot 체크아웃과 빌드 산출물은 `../linux-kernel-lab-build-glibc/`에 생깁니다 (`WORK_DIR`로 변경 가능).
+- 커널 모듈은 커널과 버전·설정이 정확히 일치해야 로드되므로, 이 디렉터리를 유지한 채 `modules`로 다시 빌드합니다.
+- 커널 설정은 `buildroot-external/board/kernellab/linux.config`, Buildroot 설정은 `buildroot-external/configs/kernellab_defconfig`입니다.
+- 예제는 64비트 Ubuntu를 기준으로 작성되어 있어, 32비트에서 생기는 경고가 빌드를 막지 않도록 `-Werror`만 무력화하고 나머지는 각 수업의 `Makefile` 그대로 빌드합니다.
+
+## 테스트
+
+```bash
+node tests/boot-test.mjs               # 커널 모듈 4종, 9p, 시계
+node tests/examples-test.mjs           # 모든 예제의 실행 순서
+node tests/examples-test.mjs class12-01   # 한 수업만
+```
+
+브라우저 없이 v86으로 이미지를 부팅해, 페이지와 같은 직렬 콘솔 셸에 명령을 입력합니다. `VERBOSE=1`을 주면 게스트 콘솔 출력이 보이고, 예제 테스트의 전체 기록은 `tests/out/<수업>.log`에 남습니다.
+
+## GitHub Pages 배포
+
+저장소 **Settings → Pages → Deploy from a branch → `main` / `(root)`**. 모든 경로가 상대 경로이므로 저장소 이름과 무관하게 동작합니다. `.nojekyll`이 있어 파일이 그대로 제공됩니다.
+
+## 제약
+
+- v86은 32비트 단일 코어 에뮬레이터입니다. `long`과 `size_t`가 4바이트이고, CPU가 하나라 데이터 경쟁이 실제 장비보다 드물게 나타납니다. 예제별 차이는 각 페이지의 주의 사항에 적혀 있습니다.
+- systemd, gdb, 컴파일러, 네트워크가 없습니다. 해당 실습(서비스 등록, 디버깅, `make`)은 실제 Linux에서 진행합니다.
+- 게스트 상태는 브라우저 메모리에만 있으며 새로고침하면 초기화됩니다.
+- GitHub Pages는 정적 호스팅이라 서버 측 빌드, 제출, 채점 기능은 없습니다.
+
+## 라이선스 및 소스 제공
+
+배포되는 `images/`에는 Linux 커널(GPL-2.0), BusyBox(GPL-2.0), glibc(LGPL-2.1), strace(LGPL-2.1)가 들어 있습니다. 바이너리를 공개 배포할 때는 대응 소스를 제공해야 하며, 이 저장소의 Buildroot 설정과 `scripts/build-images.sh`로 동일한 소스를 내려받아 재현할 수 있습니다 (`make legal-info`로 소스 묶음 생성 가능). v86은 BSD-2-Clause(`build/LICENSE.v86`), xterm.js는 MIT(`vendor/xterm/LICENSE`), SeaBIOS는 LGPL-3.0입니다.

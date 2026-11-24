@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>5주차 1차시 시스템 정보와 자원 한계 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body data-root="../../">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><span>5주차 1차시</span></nav>
+  <header>
+    <h1>시스템 정보와 자원 한계</h1>
+    <p>uname·sysconf·sysinfo로 시스템 정보를 조회하고, getrlimit/setrlimit로 자원 한계를 다루며, /proc으로 프로세스 상태를 관찰하는 예제입니다.</p>
+  </header>
+  <main class="list">
+    <ul class="cards">
+      <li><a href="sysprobe.html"><strong>sysprobe</strong><span>uname(2)의 필드와 sysconf(3) 값(온라인 CPU 수, 페이지 크기, CLK_TCK, OPEN_MAX, ARG_MAX)을 출력합니다. sysconf의 -1 반환을 errno로 구분하는 계약을 보여 줍니다.</span></a></li>
+      <li><a href="limit_show.html"><strong>limit_show</strong><span>getrlimit(2)로 nofile, as, stack, fsize, cpu, nproc, core의 soft·hard 한계를 출력하고 RLIM_INFINITY는 unlimited로 표시합니다.</span></a></li>
+      <li><a href="nofile_demo.html"><strong>nofile_demo</strong><span>/dev/null을 EMFILE이 날 때까지 반복해서 열어 FD 한계를 실험합니다. --raise N을 주면 setrlimit(2)로 soft 한계를 N(hard 이하)으로 바꾼 뒤 측정합니다.</span></a></li>
+      <li><a href="proc_probe.html"><strong>proc_probe</strong><span>/proc/self/status에서 VmRSS·Threads 줄을 골라 출력하고, /proc/loadavg 첫 줄과 /proc/self/fd의 항목 수를 셉니다.</span></a></li>
+      <li><a href="sysinfo_demo.html"><strong>sysinfo_demo</strong><span>Linux 전용 sysinfo(2)로 uptime, 부하 평균(고정소수점), 프로세스 수, 전체·여유 메모리를 출력합니다. 조건부 컴파일로 플랫폼을 구분하는 예입니다.</span></a></li>
+    </ul>
+  </main>
+</body>
+</html>

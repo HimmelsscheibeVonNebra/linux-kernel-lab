@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>10주차 3차시 부모가 자식을 제어하기 (fork · waitpid · kill) · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body data-root="../../">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><span>10주차 3차시</span></nav>
+  <header>
+    <h1>부모가 자식을 제어하기 (fork · waitpid · kill)</h1>
+    <p>부모 프로세스가 fork와 waitpid로 자식 여러 개에게 일을 나눠 주고, 시그널(SIGUSR1·SIGSTOP·SIGCONT·SIGTERM·SIGKILL)로 자식을 제어하는 예제입니다.</p>
+  </header>
+  <main class="list">
+    <ul class="cards">
+      <li><a href="forkpool.html"><strong>forkpool</strong><span>시그널 없이 fork와 waitpid(-1)만으로 작업 풀을 만듭니다. 동시에 도는 자식 수를 MAXPAR로 제한하고, 종료 코드로 성공·실패를 판정해 실패한 작업(작업 3의 첫 시도)을 한 번 더 시킵니다.</span></a></li>
+      <li><a href="sigctl.html"><strong>sigctl</strong><span>부모가 kill로 SIGUSR1(보고 요청), SIGSTOP(멈춤), SIGCONT(재개), SIGTERM(정리 종료) 또는 SIGKILL(강제 종료)을 보내고, waitpid(WUNTRACED | WCONTINUED)로 자식의 상태 변화를 확인합니다. 자식의 핸들러는 깃발만 세웁니다.</span></a></li>
+    </ul>
+  </main>
+</body>
+</html>

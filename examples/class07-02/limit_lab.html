@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>limit_lab — 프로세스 심화: 측정하고 실험하기 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class07-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">7주차 2차시</a><span class="sep">/</span><span>limit_lab</span></nav>
+  <header>
+    <h1>limit_lab</h1>
+    <p>setrlimit으로 soft 한계(NOFILE·AS·CPU)를 낮춘 뒤 일부러 넘겨 EMFILE, ENOMEM, SIGXCPU가 각각 어떻게 나타나는지 확인한다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class07-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./limit_lab nofile 16" title="터미널에서 실행" aria-label="실행: ./limit_lab nofile 16">▶</button><code>./limit_lab nofile 16</code></div>
+          <p>13번 연 뒤 errno=24(EMFILE)로 실패: 16 - 표준 스트림 3개</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./limit_lab as 64" title="터미널에서 실행" aria-label="실행: ./limit_lab as 64">▶</button><code>./limit_lab as 64</code></div>
+          <p>주소 공간 한계 64MiB에서 128MiB malloc → NULL, errno=12(ENOMEM)</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./limit_lab cpu 1; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./limit_lab cpu 1; echo &quot;exit=$?&quot;">▶</button><code>./limit_lab cpu 1; echo &quot;exit=$?&quot;</code></div>
+          <p>CPU 1초를 넘기면 SIGXCPU로 종료: exit=152 (128+24)</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="kill -l 24" title="터미널에서 실행" aria-label="실행: kill -l 24">▶</button><code>kill -l 24</code></div>
+          <p>시그널 24번의 이름이 XCPU임을 확인</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="(ulimit -n 20; ./limit_lab nofile 1024); ulimit -n" title="터미널에서 실행" aria-label="실행: (ulimit -n 20; ./limit_lab nofile 1024); ulimit -n">▶</button><code>(ulimit -n 20; ./limit_lab nofile 1024); ulimit -n</code></div>
+          <p>soft는 hard(20)를 넘을 수 없어 17번에서 실패하고, 셸의 한계는 그대로다</p>
+        </li>
+      </ol>
+      <p class="callout">32비트에서는 size_t가 4바이트라 'as 2048' 이상은 요청 크기(2배)가 넘쳐 0이 되어 malloc이 성공으로 보고된다. 작은 값(16~512)으로 실험한다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>limit_lab.c <span class="muted">108줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;sys/resource.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* 자원 한계를 낮춘 뒤 일부러 넘겨서 &quot;넘으면 무엇이 일어나는가&quot;를 본다.</span>
+<span class="ln">   nofile N : soft NOFILE을 N으로 낮추고 /dev/null을 실패할 때까지 연다.</span>
+<span class="ln">              EMFILE로 실패하며 열린 개수는 N - 3(표준 스트림)이다.</span>
+<span class="ln">   as MiB   : soft AS를 MiB로 낮추고 그 두 배를 malloc한다. NULL과</span>
+<span class="ln">              ENOMEM이 돌아온다(Linux. 다른 시스템은 결과가 다를 수 있다).</span>
+<span class="ln">   cpu S    : soft CPU를 S초로 낮추고 계속 계산한다. 한계를 넘으면</span>
+<span class="ln">              커널이 SIGXCPU를 보내 기본 동작으로 종료된다.</span>
+<span class="ln">   한계는 이 프로세스(와 이후의 자식)에만 적용되고 셸에는 영향이 없다. */</span>
+<span class="ln"> </span>
+<span class="ln">/* soft 한계를 value로 낮추고 실제로 적용된 값을 돌려준다(실패 시 -1) */</span>
+<span class="ln">static long long lower_soft(int resource, rlim_t value)</span>
+<span class="ln">{</span>
+<span class="ln">    struct rlimit lim;</span>
+<span class="ln">    if (getrlimit(resource, &amp;lim) == -1) {</span>
+<span class="ln">        perror(&quot;getrlimit&quot;);</span>
+<span class="ln">        return -1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (lim.rlim_max != RLIM_INFINITY &amp;&amp; value &gt; lim.rlim_max)</span>
+<span class="ln">        value = lim.rlim_max;   /* soft는 hard를 넘을 수 없다 */</span>
+<span class="ln">    lim.rlim_cur = value;</span>
+<span class="ln">    if (setrlimit(resource, &amp;lim) == -1) {</span>
+<span class="ln">        perror(&quot;setrlimit&quot;);</span>
+<span class="ln">        return -1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return (long long)value;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int nofile(long n)</span>
+<span class="ln">{</span>
+<span class="ln">    long long soft = lower_soft(RLIMIT_NOFILE, (rlim_t)n);</span>
+<span class="ln">    if (soft == -1)</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    int fds[1024];</span>
+<span class="ln">    int count = 0;</span>
+<span class="ln">    while (count &lt; 1024) {</span>
+<span class="ln">        int fd = open(&quot;/dev/null&quot;, O_RDONLY);</span>
+<span class="ln">        if (fd == -1) {</span>
+<span class="ln">            printf(&quot;open failed after %d opens: errno=%d (%s)\n&quot;,</span>
+<span class="ln">                   count, errno, strerror(errno));</span>
+<span class="ln">            break;</span>
+<span class="ln">        }</span>
+<span class="ln">        fds[count++] = fd;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;last_fd=%d soft_limit=%lld\n&quot;, count ? fds[count - 1] : -1, soft);</span>
+<span class="ln">    for (int i = 0; i &lt; count; i++)</span>
+<span class="ln">        close(fds[i]);</span>
+<span class="ln">    printf(&quot;closed=%d\n&quot;, count);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int as_limit(long mib)</span>
+<span class="ln">{</span>
+<span class="ln">    if (lower_soft(RLIMIT_AS, (rlim_t)mib * 1024 * 1024) == -1)</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    size_t want = (size_t)mib * 2 * 1024 * 1024;</span>
+<span class="ln">    errno = 0;</span>
+<span class="ln">    void *p = malloc(want);</span>
+<span class="ln">    if (p == NULL) {</span>
+<span class="ln">        printf(&quot;malloc(%ld MiB) = NULL errno=%d (%s)\n&quot;,</span>
+<span class="ln">               mib * 2, errno, strerror(errno));</span>
+<span class="ln">    } else {</span>
+<span class="ln">        printf(&quot;malloc(%ld MiB) succeeded (limit not enforced here)\n&quot;,</span>
+<span class="ln">               mib * 2);</span>
+<span class="ln">        free(p);</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int cpu_limit(long seconds)</span>
+<span class="ln">{</span>
+<span class="ln">    if (lower_soft(RLIMIT_CPU, (rlim_t)seconds) == -1)</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    printf(&quot;pid=%ld spinning past %ld s of CPU...\n&quot;,</span>
+<span class="ln">           (long)getpid(), seconds);</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    volatile unsigned long spin = 0;</span>
+<span class="ln">    for (;;)</span>
+<span class="ln">        spin++;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc == 3) {</span>
+<span class="ln">        char *end = NULL;</span>
+<span class="ln">        long v = strtol(argv[2], &amp;end, 10);</span>
+<span class="ln">        int valid = end != argv[2] &amp;&amp; *end == '\0';</span>
+<span class="ln">        if (valid &amp;&amp; strcmp(argv[1], &quot;nofile&quot;) == 0 &amp;&amp; v &gt;= 4 &amp;&amp; v &lt;= 1024)</span>
+<span class="ln">            return nofile(v);</span>
+<span class="ln">        if (valid &amp;&amp; strcmp(argv[1], &quot;as&quot;) == 0 &amp;&amp; v &gt;= 16 &amp;&amp; v &lt;= 4096)</span>
+<span class="ln">            return as_limit(v);</span>
+<span class="ln">        if (valid &amp;&amp; strcmp(argv[1], &quot;cpu&quot;) == 0 &amp;&amp; v &gt;= 1 &amp;&amp; v &lt;= 10)</span>
+<span class="ln">            return cpu_limit(v);</span>
+<span class="ln">    }</span>
+<span class="ln">    fprintf(stderr, &quot;usage: %s nofile N(4-1024) | as MiB(16-4096)&quot;</span>
+<span class="ln">            &quot; | cpu S(1-10)\n&quot;, argv[0]);</span>
+<span class="ln">    return 2;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="reap_show.html">← reap_show</a>
+    <span></span>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

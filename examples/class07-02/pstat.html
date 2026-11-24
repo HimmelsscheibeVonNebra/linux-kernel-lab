@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pstat — 프로세스 심화: 측정하고 실험하기 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class07-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">7주차 2차시</a><span class="sep">/</span><span>pstat</span></nav>
+  <header>
+    <h1>pstat</h1>
+    <p>/proc/PID/stat 한 줄을 해석해 상태·CPU 시간·메모리·폴트 수를 출력하고, 1초 간격 표본의 틱 차이로 %CPU를 계산하는 미니 top이다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class07-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pstat self" title="터미널에서 실행" aria-label="실행: ./pstat self">▶</button><code>./pstat self</code></div>
+          <p>자기 자신: comm=(pstat) state=R, clk_tck 값 확인</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="yes &gt; /dev/null &amp; ./pstat $! 3; kill $!; wait" title="터미널에서 실행" aria-label="실행: yes &gt; /dev/null &amp; ./pstat $! 3; kill $!; wait">▶</button><code>yes &gt; /dev/null &amp; ./pstat $! 3; kill $!; wait</code></div>
+          <p>CPU를 계속 쓰는 프로세스: state=R, cpu가 100% 근처</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="sleep 5 &amp; ./pstat $! 2; kill $!; wait" title="터미널에서 실행" aria-label="실행: sleep 5 &amp; ./pstat $! 2; kill $!; wait">▶</button><code>sleep 5 &amp; ./pstat $! 2; kill $!; wait</code></div>
+          <p>잠자는 프로세스: state=S, cpu=0%</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="cp pstat 'a) b'; './a) b' self; rm -f 'a) b'" title="터미널에서 실행" aria-label="실행: cp pstat 'a) b'; './a) b' self; rm -f 'a) b'">▶</button><code>cp pstat 'a) b'; './a) b' self; rm -f 'a) b'</code></div>
+          <p>이름에 ')'와 공백이 있어도 마지막 ')'를 찾아 comm=(a) b)로 바르게 해석</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pstat 999999999; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./pstat 999999999; echo &quot;exit=$?&quot;">▶</button><code>./pstat 999999999; echo &quot;exit=$?&quot;</code></div>
+          <p>없는 PID: cannot read 메시지와 종료 상태 1</p>
+        </li>
+      </ol>
+      <p class="callout">README의 'cp /bin/sleep &quot;a) b&quot;' 방식은 BusyBox에서는 애플릿 이름이 달라져 실행되지 않으므로 pstat 자신을 복사해 쓴다. CPU가 1개라 %CPU는 측정 대상과 다른 프로세스가 나눠 쓴 결과다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>pstat.c <span class="muted">117줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* /proc/PID/stat 한 줄을 해석해 미니 top 한 줄을 만든다(Linux 전용).</span>
+<span class="ln">   두 번째 필드 comm은 괄호로 감싼 실행 파일 이름인데 공백이나 ')'가</span>
+<span class="ln">   들어갈 수 있으므로, 마지막 ')'를 strrchr로 찾은 뒤부터 나눈다.</span>
+<span class="ln">   utime·stime은 클럭 틱 단위이므로 sysconf(_SC_CLK_TCK)로 나눈다.</span>
+<span class="ln">   [samples]번 1초 간격으로 읽어 두 표본의 CPU 틱 차이로 %CPU를 낸다. */</span>
+<span class="ln"> </span>
+<span class="ln">struct pstat {</span>
+<span class="ln">    char comm[64];</span>
+<span class="ln">    char state;</span>
+<span class="ln">    long ppid;</span>
+<span class="ln">    unsigned long minflt, majflt, utime, stime;</span>
+<span class="ln">    long threads;</span>
+<span class="ln">    unsigned long vsize;</span>
+<span class="ln">    long rss_pages;</span>
+<span class="ln">};</span>
+<span class="ln"> </span>
+<span class="ln">static int read_stat(long pid, struct pstat *ps)</span>
+<span class="ln">{</span>
+<span class="ln">    char path[64], line[1024];</span>
+<span class="ln">    snprintf(path, sizeof path, &quot;/proc/%ld/stat&quot;, pid);</span>
+<span class="ln">    FILE *fp = fopen(path, &quot;r&quot;);</span>
+<span class="ln">    if (fp == NULL)</span>
+<span class="ln">        return -1;</span>
+<span class="ln">    char *ok = fgets(line, sizeof line, fp);</span>
+<span class="ln">    fclose(fp);</span>
+<span class="ln">    if (ok == NULL)</span>
+<span class="ln">        return -1;</span>
+<span class="ln">    char *open = strchr(line, '(');</span>
+<span class="ln">    char *close = strrchr(line, ')');</span>
+<span class="ln">    if (open == NULL || close == NULL || close &lt; open)</span>
+<span class="ln">        return -1;</span>
+<span class="ln">    size_t n = (size_t)(close - open - 1);</span>
+<span class="ln">    if (n &gt;= sizeof ps-&gt;comm)</span>
+<span class="ln">        n = sizeof ps-&gt;comm - 1;</span>
+<span class="ln">    memcpy(ps-&gt;comm, open + 1, n);</span>
+<span class="ln">    ps-&gt;comm[n] = '\0';</span>
+<span class="ln">    /* 필드 3(state)부터: %*를 붙인 필드는 읽고 버린다 */</span>
+<span class="ln">    int got = sscanf(close + 2,</span>
+<span class="ln">        &quot;%c %ld %*d %*d %*d %*d %*u %lu %*u %lu %*u %lu %lu &quot;</span>
+<span class="ln">        &quot;%*d %*d %*d %*d %ld %*d %*u %lu %ld&quot;,</span>
+<span class="ln">        &amp;ps-&gt;state, &amp;ps-&gt;ppid, &amp;ps-&gt;minflt, &amp;ps-&gt;majflt,</span>
+<span class="ln">        &amp;ps-&gt;utime, &amp;ps-&gt;stime, &amp;ps-&gt;threads, &amp;ps-&gt;vsize,</span>
+<span class="ln">        &amp;ps-&gt;rss_pages);</span>
+<span class="ln">    return got == 9 ? 0 : -1;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc &lt; 2 || argc &gt; 3) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s PID|self [samples 1-60]\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    long pid;</span>
+<span class="ln">    char *end = NULL;</span>
+<span class="ln">    if (strcmp(argv[1], &quot;self&quot;) == 0) {</span>
+<span class="ln">        pid = (long)getpid();</span>
+<span class="ln">    } else {</span>
+<span class="ln">        pid = strtol(argv[1], &amp;end, 10);</span>
+<span class="ln">        if (end == argv[1] || *end != '\0' || pid &lt; 1) {</span>
+<span class="ln">            fprintf(stderr, &quot;usage: %s PID|self [samples 1-60]\n&quot;, argv[0]);</span>
+<span class="ln">            return 2;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    long samples = 1;</span>
+<span class="ln">    if (argc == 3) {</span>
+<span class="ln">        samples = strtol(argv[2], &amp;end, 10);</span>
+<span class="ln">        if (end == argv[2] || *end != '\0' || samples &lt; 1 || samples &gt; 60) {</span>
+<span class="ln">            fprintf(stderr, &quot;usage: %s PID|self [samples 1-60]\n&quot;, argv[0]);</span>
+<span class="ln">            return 2;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    long tick = sysconf(_SC_CLK_TCK);</span>
+<span class="ln">    long page = sysconf(_SC_PAGESIZE);</span>
+<span class="ln">    struct pstat prev, cur;</span>
+<span class="ln">    if (read_stat(pid, &amp;prev) == -1) {</span>
+<span class="ln">#ifdef __linux__</span>
+<span class="ln">        fprintf(stderr, &quot;/proc/%ld/stat: cannot read or parse\n&quot;, pid);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">#else</span>
+<span class="ln">        printf(&quot;stat=unsupported (no /proc on this system)\n&quot;);</span>
+<span class="ln">        return 0;</span>
+<span class="ln">#endif</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;pid=%ld comm=(%s) ppid=%ld threads=%ld clk_tck=%ld\n&quot;,</span>
+<span class="ln">           pid, prev.comm, prev.ppid, prev.threads, tick);</span>
+<span class="ln">    for (long i = 0; i &lt; samples; i++) {</span>
+<span class="ln">        if (samples &gt; 1)</span>
+<span class="ln">            sleep(1);</span>
+<span class="ln">        if (read_stat(pid, &amp;cur) == -1) {</span>
+<span class="ln">            printf(&quot;gone: pid %ld exited\n&quot;, pid);</span>
+<span class="ln">            break;</span>
+<span class="ln">        }</span>
+<span class="ln">        unsigned long d = (cur.utime + cur.stime) - (prev.utime + prev.stime);</span>
+<span class="ln">        /* 표본이 하나면 비교할 구간이 없으므로 %CPU는 '-'로 둔다 */</span>
+<span class="ln">        if (samples &gt; 1)</span>
+<span class="ln">            printf(&quot;state=%c cpu=%3.0f%% &quot;, cur.state,</span>
+<span class="ln">                   100.0 * (double)d / (double)tick);</span>
+<span class="ln">        else</span>
+<span class="ln">            printf(&quot;state=%c cpu=-    &quot;, cur.state);</span>
+<span class="ln">        printf(&quot;utime=%.2f stime=%.2f vsz_kib=%lu rss_kib=%ld &quot;</span>
+<span class="ln">               &quot;minflt=%lu majflt=%lu\n&quot;,</span>
+<span class="ln">               (double)cur.utime / tick, (double)cur.stime / tick,</span>
+<span class="ln">               cur.vsize / 1024, cur.rss_pages * page / 1024,</span>
+<span class="ln">               cur.minflt, cur.majflt);</span>
+<span class="ln">        prev = cur;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="pagetouch.html">← pagetouch</a>
+    <a href="cpu_wait.html">cpu_wait →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

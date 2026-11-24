@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>12주차 2차시 양방향 파이프 · 파이프라인 · FIFO 서버 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body data-root="../../">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><span>12주차 2차시</span></nav>
+  <header>
+    <h1>양방향 파이프 · 파이프라인 · FIFO 서버</h1>
+    <p>파이프 두 개로 묻고 답하는 양방향 통신과 그때 생기는 교착, 여러 단계 파이프라인을 반복문으로 만드는 방법, FIFO로 여러 클라이언트를 받는 서버를 다루는 예제입니다.</p>
+  </header>
+  <main class="list">
+    <ul class="cards">
+      <li><a href="pipe_two.html"><strong>pipe_two</strong><span>방향마다 파이프를 하나씩(req, rep) 만들어 부모가 ping을 보내고 자식이 pong으로 답합니다. 각자 쓰지 않는 끝점을 닫는 규칙을 보여 줍니다.</span></a></li>
+      <li><a href="pipetalk.html"><strong>pipetalk</strong><span>파이프 두 개로 부모와 자식이 묻고 답하는 규약(ask)과, 서로 기다리다 멈추는 교착 세 가지를 재현합니다: 둘 다 먼저 읽기(both), 답이 stdio 버퍼에 갇힘(mute), 두 파이프가 모두 가득 참(flood). fix는 쓰는 일을 다른 프로세스에 맡겨 flood를 해결합니다.</span></a></li>
+      <li><a href="pipeline.html"><strong>pipeline</strong><span>셸의 CMD1 | CMD2 | ... | CMDN 을 반복문 하나로 만듭니다. 부모는 '앞 파이프의 읽기 끝' 하나만 들고 다니며 단계마다 pipe · fork · dup2 · execvp를 하고, 모두 띄운 뒤 waitpid로 거둡니다.</span></a></li>
+      <li><a href="fifosrv.html"><strong>fifosrv</strong><span>FIFO 하나로 여러 클라이언트의 요청을 받는 덧셈 서버입니다. 요청(고정 길이 구조체)은 모두 서버 FIFO로 오고, 답은 클라이언트가 PID를 붙여 만든 전용 FIFO로 돌려보냅니다.</span></a></li>
+    </ul>
+  </main>
+</body>
+</html>

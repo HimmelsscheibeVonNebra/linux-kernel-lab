@@ -1,0 +1,83 @@
+{
+  "class": "class06-01",
+  "title": "프로세스 정체성·인자·환경",
+  "summary": "프로세스의 PID·PPID·PGID·SID, 명령행 인자, 환경 변수, 작업 디렉토리, 자격 증명을 조회하고 ps·/proc과 교차 확인하는 예제입니다.",
+  "examples": [
+    {
+      "name": "id_probe",
+      "source": "id_probe.c",
+      "summary": "getpid·getppid·getpgrp·getsid로 프로세스 정체성을 출력하고 ttyname으로 표준 입력에 연결된 터미널을 확인합니다.",
+      "steps": [
+        { "cmd": "./id_probe", "note": "pid, ppid(셸의 PID), pgid, sid와 tty 이름을 확인합니다." },
+        { "cmd": "./id_probe < /dev/null", "note": "표준 입력이 터미널이 아니면 ttyname이 NULL이라 tty=(none)이 됩니다." },
+        { "cmd": "./id_probe | cat", "note": "출력만 파이프로 보내면 표준 입력은 여전히 터미널이라 tty가 그대로입니다." },
+        { "cmd": "ps -o pid,ppid,pgid,sid,tty,stat,args | grep -E \"PID|^ *$$ \"", "note": "셸 자신($$)의 줄입니다. id_probe의 ppid·sid와 맞춰 봅니다." },
+        { "cmd": "sleep 30 & ps -o pid,ppid,pgid,sid,args | grep -E 'PID|[s]leep 30'; kill $!", "note": "백그라운드 작업의 PPID는 셸의 PID이고, 작업 제어가 켜진 셸에서는 PGID가 자기 PID입니다." }
+      ],
+      "manual": false,
+      "expect": "tty=(none)",
+      "notes": "프로그램이 마지막에 안내하는 'ps ... -p PID' 형식은 BusyBox ps가 지원하지 않습니다(-p 옵션과 command 열 없음). 대신 ps -o ... | grep 으로 확인합니다."
+    },
+    {
+      "name": "arg_show",
+      "source": "arg_show.c",
+      "summary": "argc와 argv 배열을 출력하고 argv[argc]가 NULL임을 보여 줍니다. argv[0]은 호출 쪽이 정하는 값이라 프로그램 판별에 쓸 수 없음을 확인합니다.",
+      "steps": [
+        { "cmd": "./arg_show one two three", "note": "argc=4, argv[0]~argv[3], 그리고 argv[4]=(nil)을 확인합니다." },
+        { "cmd": "./arg_show 'a b' '' '*.c' *.c | head -8", "note": "따옴표는 셸이 처리합니다. 빈 문자열도 인자 하나이고, 따옴표 없는 *.c는 셸이 파일 이름들로 펼칩니다." },
+        { "cmd": "(exec -a fake-name ./arg_show x)", "note": "exec -a로 argv[0]만 fake-name으로 바뀝니다." },
+        { "cmd": "ln -sf arg_show other_name && ./other_name x; rm -f other_name", "note": "같은 실행 파일도 다른 이름으로 부르면 argv[0]이 달라집니다." }
+      ],
+      "manual": false,
+      "expect": "argv[4]=(nil)",
+      "notes": "README의 bash -c 'exec -a ...'는 bash가 없어 ash 서브셸로 대체했습니다. BusyBox ash 버전에 따라 exec -a를 지원하지 않으면 그 단계만 오류가 나며, 심볼릭 링크 단계로 같은 개념을 확인할 수 있습니다."
+    },
+    {
+      "name": "env_dump",
+      "source": "env_dump.c",
+      "summary": "environ 배열을 순회해 환경 전체를 출력하고, --find/--set/--unset으로 getenv·setenv·unsetenv의 동작과 변경 범위(이 프로세스 안)를 관찰합니다.",
+      "steps": [
+        { "cmd": "./env_dump | head -4", "note": "첫 줄은 env_count, 이어서 NAME=value 형식의 항목이 나옵니다." },
+        { "cmd": "MESSAGE=hi ./env_dump --find MESSAGE", "note": "명령 앞에 붙인 변수는 그 프로세스의 환경에만 들어갑니다." },
+        { "cmd": "./env_dump --find MESSAGE", "note": "셸에는 없는 변수이므로 getenv가 NULL을 돌려줘 (unset)이 됩니다." },
+        { "cmd": "./env_dump --set PROBE=1", "note": "setenv 뒤 env_count가 1 늘고 PROBE=1이 조회됩니다." },
+        { "cmd": "PROBE=1 ./env_dump --unset PROBE; echo \"shell: ${PROBE:-unset}\"", "note": "unsetenv 뒤 (unset)이 됩니다. 앞 단계의 setenv도 부모 셸에는 전파되지 않았습니다." },
+        { "cmd": "env -i PATH=/usr/bin ./env_dump", "note": "env -i로 환경을 비우면 env_count=1이고 PATH 한 줄만 나옵니다." }
+      ],
+      "manual": false,
+      "expect": "MESSAGE=hi"
+    },
+    {
+      "name": "cwd_probe",
+      "source": "cwd_probe.c",
+      "summary": "getcwd를 버퍼 전달 방식과 (NULL, 0) 할당 방식 두 가지로 호출하고, 인자가 있으면 chdir(2) 후 다시 조회합니다. 실패 경로(ENOENT·ENOTDIR)도 확인합니다.",
+      "steps": [
+        { "cmd": "./cwd_probe", "note": "cwd와 cwd_alloc 두 방식의 결과가 같습니다." },
+        { "cmd": "./cwd_probe /tmp", "note": "after_chdir=/tmp로 바뀝니다." },
+        { "cmd": "pwd", "note": "부모 셸의 작업 디렉토리는 그대로입니다." },
+        { "cmd": "./cwd_probe /no/such/dir; echo \"status=$?\"", "note": "없는 경로는 'No such file or directory'와 종료 상태 1입니다." },
+        { "cmd": "./cwd_probe /proc/version; echo \"status=$?\"", "note": "파일을 가리키면 'Not a directory'(ENOTDIR)로 실패합니다." },
+        { "cmd": "readlink /proc/$$/cwd", "note": "커널이 기록한 셸의 작업 디렉토리를 /proc에서 확인합니다." }
+      ],
+      "manual": false,
+      "expect": "after_chdir=/tmp",
+      "notes": "README의 /etc/hosts는 게스트에 없을 수 있어 항상 존재하는 일반 파일 /proc/version으로 ENOTDIR을 확인합니다."
+    },
+    {
+      "name": "procinfo",
+      "source": "procinfo.c",
+      "summary": "정체성(pid·ppid·pgid·sid·tty), 자격 증명(uid·euid·gid·egid), 작업 디렉토리, 인자, 환경 요약을 한 번에 출력하는 종합 보고서입니다. --argv, --env로 전체 목록을 볼 수 있습니다.",
+      "steps": [
+        { "cmd": "./procinfo one --argv", "note": "argc=3과 argv 목록, env_count, HOME·PATH 값을 확인합니다." },
+        { "cmd": "id", "note": "uid·gid 숫자가 procinfo의 uid/euid, gid/egid와 같은지 맞춥니다." },
+        { "cmd": "(cd /tmp && \"$OLDPWD/procinfo\" | grep cwd); pwd", "note": "서브셸에서만 cwd=/tmp입니다. 바깥 셸의 pwd는 그대로입니다." },
+        { "cmd": "env -i ./procinfo --env", "note": "빈 환경에서는 env_count=0이고 HOME·PATH가 (unset)입니다." },
+        { "cmd": "grep -E '^(Name|Pid|PPid|Uid|Gid)' /proc/$$/status", "note": "셸의 Pid가 procinfo의 ppid와, Uid·Gid가 uid·gid와 같은지 확인합니다." },
+        { "cmd": "./procinfo --bogus; echo \"status=$?\"", "note": "알 수 없는 -- 옵션은 usage와 종료 상태 2입니다." }
+      ],
+      "manual": false,
+      "expect": "uid=1000 euid=1000",
+      "notes": "root가 아닌 student(uid 1000)로 실행하므로 uid=1000 euid=1000이 나옵니다."
+    }
+  ]
+}

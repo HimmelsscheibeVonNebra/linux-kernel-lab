@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>helloworld — 첫 수업 실습: 실행하고 비교하기 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class02-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">2주차 1차시</a><span class="sep">/</span><span>helloworld</span></nav>
+  <header>
+    <h1>helloworld</h1>
+    <p>printf로 한 줄을 출력하고 0을 반환하며 끝나는 가장 단순한 프로그램이다. 종료 상태와 표준 출력 리다이렉션(&gt;, &gt;&gt;)을 관찰한다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class02-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./service/helloworld; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./service/helloworld; echo &quot;exit=$?&quot;">▶</button><code>./service/helloworld; echo &quot;exit=$?&quot;</code></div>
+          <p>Hello, world!가 한 번 출력되고 종료 상태는 0이다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./service/helloworld &gt; hello.txt; ./service/helloworld &gt;&gt; hello.txt; cat hello.txt" title="터미널에서 실행" aria-label="실행: ./service/helloworld &gt; hello.txt; ./service/helloworld &gt;&gt; hello.txt; cat hello.txt">▶</button><code>./service/helloworld &gt; hello.txt; ./service/helloworld &gt;&gt; hello.txt; cat hello.txt</code></div>
+          <p>&gt;는 덮어쓰기, &gt;&gt;는 덧붙이기이므로 파일에 두 줄이 남는다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="wc -l hello.txt" title="터미널에서 실행" aria-label="실행: wc -l hello.txt">▶</button><code>wc -l hello.txt</code></div>
+          <p>줄 수가 2인지 확인한다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="strace -e trace=write ./service/helloworld" title="터미널에서 실행" aria-label="실행: strace -e trace=write ./service/helloworld">▶</button><code>strace -e trace=write ./service/helloworld</code></div>
+          <p>printf가 결국 write(1, ...) 시스템 콜 한 번으로 이어지는 것을 본다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="cat /proc/1/comm" title="터미널에서 실행" aria-label="실행: cat /proc/1/comm">▶</button><code>cat /proc/1/comm</code></div>
+          <p>PID 1이 systemd가 아니므로 이 VM에서는 서비스 등록 단계를 진행할 수 없다.</p>
+        </li>
+      </ol>
+      <p class="callout">이 VM에는 systemd, sudo, gcc가 없어 README의 컴파일·서비스 등록(systemctl, journalctl) 단계는 실행할 수 없고 직접 실행만 가능하다. 실습 1~6의 apt, python3 웹 서버, curl 등도 사용할 수 없다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>service/helloworld.c <span class="muted">9줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">int main(void)</span>
+<span class="ln">{</span>
+<span class="ln">    /* printf로 문자열을 출력하고 \n으로 줄을 바꿉니다. */</span>
+<span class="ln">    printf(&quot;Hello, world!\n&quot;);</span>
+<span class="ln">    /* 한 번 출력한 뒤 정상 종료합니다. 서비스 로그에서 결과를 확인합니다. */</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <span></span>
+    <span></span>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

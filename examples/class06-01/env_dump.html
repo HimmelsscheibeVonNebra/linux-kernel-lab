@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>env_dump — 프로세스 정체성·인자·환경 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class06-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">6주차 1차시</a><span class="sep">/</span><span>env_dump</span></nav>
+  <header>
+    <h1>env_dump</h1>
+    <p>environ 배열을 순회해 환경 전체를 출력하고, --find/--set/--unset으로 getenv·setenv·unsetenv의 동작과 변경 범위(이 프로세스 안)를 관찰합니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class06-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./env_dump | head -4" title="터미널에서 실행" aria-label="실행: ./env_dump | head -4">▶</button><code>./env_dump | head -4</code></div>
+          <p>첫 줄은 env_count, 이어서 NAME=value 형식의 항목이 나옵니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="MESSAGE=hi ./env_dump --find MESSAGE" title="터미널에서 실행" aria-label="실행: MESSAGE=hi ./env_dump --find MESSAGE">▶</button><code>MESSAGE=hi ./env_dump --find MESSAGE</code></div>
+          <p>명령 앞에 붙인 변수는 그 프로세스의 환경에만 들어갑니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./env_dump --find MESSAGE" title="터미널에서 실행" aria-label="실행: ./env_dump --find MESSAGE">▶</button><code>./env_dump --find MESSAGE</code></div>
+          <p>셸에는 없는 변수이므로 getenv가 NULL을 돌려줘 (unset)이 됩니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./env_dump --set PROBE=1" title="터미널에서 실행" aria-label="실행: ./env_dump --set PROBE=1">▶</button><code>./env_dump --set PROBE=1</code></div>
+          <p>setenv 뒤 env_count가 1 늘고 PROBE=1이 조회됩니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="PROBE=1 ./env_dump --unset PROBE; echo &quot;shell: ${PROBE:-unset}&quot;" title="터미널에서 실행" aria-label="실행: PROBE=1 ./env_dump --unset PROBE; echo &quot;shell: ${PROBE:-unset}&quot;">▶</button><code>PROBE=1 ./env_dump --unset PROBE; echo &quot;shell: ${PROBE:-unset}&quot;</code></div>
+          <p>unsetenv 뒤 (unset)이 됩니다. 앞 단계의 setenv도 부모 셸에는 전파되지 않았습니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="env -i PATH=/usr/bin ./env_dump" title="터미널에서 실행" aria-label="실행: env -i PATH=/usr/bin ./env_dump">▶</button><code>env -i PATH=/usr/bin ./env_dump</code></div>
+          <p>env -i로 환경을 비우면 env_count=1이고 PATH 한 줄만 나옵니다.</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>env_dump.c <span class="muted">83줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* 환경은 &quot;NAME=value&quot; 문자열의 널 종료 포인터 배열이다.</span>
+<span class="ln">   environ 전역 변수로 순회하고 getenv·setenv·unsetenv로</span>
+<span class="ln">   조회·변경하는 계약을 관찰한다. */</span>
+<span class="ln">extern char **environ;</span>
+<span class="ln"> </span>
+<span class="ln">static int count_env(void)</span>
+<span class="ln">{</span>
+<span class="ln">    int n = 0;</span>
+<span class="ln">    for (char **e = environ; *e != NULL; e++) {</span>
+<span class="ln">        n++;</span>
+<span class="ln">    }</span>
+<span class="ln">    return n;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void dump_env(void)</span>
+<span class="ln">{</span>
+<span class="ln">    for (char **e = environ; *e != NULL; e++) {</span>
+<span class="ln">        printf(&quot;%s\n&quot;, *e);</span>
+<span class="ln">    }</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int find_env(const char *name)</span>
+<span class="ln">{</span>
+<span class="ln">    const char *value = getenv(name);</span>
+<span class="ln">    if (value == NULL) {</span>
+<span class="ln">        printf(&quot;%s=(unset)\n&quot;, name);</span>
+<span class="ln">    } else {</span>
+<span class="ln">        printf(&quot;%s=%s\n&quot;, name, value);</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc &gt; 3) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s [--find NAME | --set NAME=VALUE&quot;</span>
+<span class="ln">                        &quot; | --unset NAME]\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (argc == 1) {</span>
+<span class="ln">        printf(&quot;env_count=%d\n&quot;, count_env());</span>
+<span class="ln">        dump_env();</span>
+<span class="ln">        return 0;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (strcmp(argv[1], &quot;--find&quot;) == 0 &amp;&amp; argc == 3) {</span>
+<span class="ln">        return find_env(argv[2]);</span>
+<span class="ln">    }</span>
+<span class="ln">    /* setenv의 세 번째 인자 1은 같은 이름이 있으면 덮어쓴다는 뜻이다.</span>
+<span class="ln">       바꾼 뒤 개수와 값을 다시 조회해 변경이 이 프로세스 안에서만</span>
+<span class="ln">       일어났음을 관찰한다. 부모 셸에는 영향을 주지 않는다. */</span>
+<span class="ln">    if (strcmp(argv[1], &quot;--set&quot;) == 0 &amp;&amp; argc == 3) {</span>
+<span class="ln">        char *eq = strchr(argv[2], '=');</span>
+<span class="ln">        if (eq == NULL || eq == argv[2]) {</span>
+<span class="ln">            fprintf(stderr, &quot;--set expects NAME=VALUE\n&quot;);</span>
+<span class="ln">            return 2;</span>
+<span class="ln">        }</span>
+<span class="ln">        size_t name_len = (size_t)(eq - argv[2]);</span>
+<span class="ln">        char name[name_len + 1];</span>
+<span class="ln">        memcpy(name, argv[2], name_len);</span>
+<span class="ln">        name[name_len] = '\0';</span>
+<span class="ln">        if (setenv(name, eq + 1, 1) == -1) {</span>
+<span class="ln">            perror(&quot;setenv&quot;);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">        printf(&quot;env_count=%d\n&quot;, count_env());</span>
+<span class="ln">        return find_env(name);</span>
+<span class="ln">    }</span>
+<span class="ln">    if (strcmp(argv[1], &quot;--unset&quot;) == 0 &amp;&amp; argc == 3) {</span>
+<span class="ln">        if (unsetenv(argv[2]) == -1) {</span>
+<span class="ln">            perror(&quot;unsetenv&quot;);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">        printf(&quot;env_count=%d\n&quot;, count_env());</span>
+<span class="ln">        return find_env(argv[2]);</span>
+<span class="ln">    }</span>
+<span class="ln">    fprintf(stderr, &quot;usage: %s [--find NAME | --set NAME=VALUE&quot;</span>
+<span class="ln">                    &quot; | --unset NAME]\n&quot;, argv[0]);</span>
+<span class="ln">    return 2;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="arg_show.html">← arg_show</a>
+    <a href="cwd_probe.html">cwd_probe →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>thcount — 공유 메모리 · 세마포어 · 스레드 동기화 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class13-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">13주차 2차시</a><span class="sep">/</span><span>thcount</span></nav>
+  <header>
+    <h1>thcount</h1>
+    <p>스레드 여럿이 전역 변수 하나를 올립니다. 잠금 없이(none), 뮤텍스로(mutex), 세마포어로(sem) 올린 결과를 기대값과 비교합니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class13-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./thcount none 4 5000000" title="터미널에서 실행" aria-label="실행: ./thcount none 4 5000000">▶</button><code>./thcount none 4 5000000</code></div>
+          <p>잠금 없이 스레드 4개 × 500만 번. count가 기대값 20000000보다 작으면 갱신이 사라진 것이다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./thcount mutex 4 500000" title="터미널에서 실행" aria-label="실행: ./thcount mutex 4 500000">▶</button><code>./thcount mutex 4 500000</code></div>
+          <p>pthread_mutex로 잠그면 항상 정확히 count = 2000000 (기대 2000000).</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./thcount sem 4 500000" title="터미널에서 실행" aria-label="실행: ./thcount sem 4 500000">▶</button><code>./thcount sem 4 500000</code></div>
+          <p>처음 값 1인 세마포어(sem_wait · sem_post)로 잠가도 결과는 정확하다.</p>
+        </li>
+      </ol>
+      <p class="callout">이 VM은 CPU가 1개라서 none 모드의 경쟁은 스레드가 count++ 중간에 타이머 인터럽트로 교체될 때만 생깁니다. 반복 횟수를 500만으로 키웠지만 그래도 기대값이 그대로 나올 수 있으니 몇 번 반복해 보세요. mutex · sem은 VM 속도를 고려해 50만 번으로 줄였습니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>thcount.c <span class="muted">58줄</span></summary>
+      <pre class="code"><code><span class="ln">/* thcount.c — 스레드 여럿이 전역 변수 하나를 올린다</span>
+<span class="ln"> *   ./thcount none  [THREADS [N]]   잠금 없이</span>
+<span class="ln"> *   ./thcount mutex [THREADS [N]]   뮤텍스로 잠그고</span>
+<span class="ln"> *   ./thcount sem   [THREADS [N]]   세마포어로 잠그고   (기본: 4개 × 1000000번)</span>
+<span class="ln"> */</span>
+<span class="ln">#include &lt;pthread.h&gt;</span>
+<span class="ln">#include &lt;semaphore.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">static volatile long count;     /* 전역 변수: 모든 스레드가 같은 것을 본다 */</span>
+<span class="ln">static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;</span>
+<span class="ln">static sem_t sem;</span>
+<span class="ln">static long n = 1000000;</span>
+<span class="ln">static char mode;</span>
+<span class="ln"> </span>
+<span class="ln">static void *worker(void *arg)</span>
+<span class="ln">{</span>
+<span class="ln">    (void)arg;</span>
+<span class="ln">    for (long i = 0; i &lt; n; i++) {</span>
+<span class="ln">        if (mode == 'm') {</span>
+<span class="ln">            pthread_mutex_lock(&amp;lock);      /* 잠근 스레드가 */</span>
+<span class="ln">            count++;</span>
+<span class="ln">            pthread_mutex_unlock(&amp;lock);    /* 직접 푼다 */</span>
+<span class="ln">        } else if (mode == 's') {</span>
+<span class="ln">            sem_wait(&amp;sem);</span>
+<span class="ln">            count++;</span>
+<span class="ln">            sem_post(&amp;sem);</span>
+<span class="ln">        } else {</span>
+<span class="ln">            count++;                        /* 읽고 · 더하고 · 쓴다 */</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    return NULL;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    int nth = argc &gt; 2 ? atoi(argv[2]) : 4;</span>
+<span class="ln">    if (argc &gt; 3) n = atol(argv[3]);</span>
+<span class="ln">    if (argc &lt; 2 || (strcmp(argv[1], &quot;none&quot;) &amp;&amp; strcmp(argv[1], &quot;mutex&quot;) &amp;&amp;</span>
+<span class="ln">                     strcmp(argv[1], &quot;sem&quot;)) || nth &lt; 1 || nth &gt; 64) {</span>
+<span class="ln">        fprintf(stderr, &quot;사용법: %s none|mutex|sem [THREADS [N]]\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    mode = argv[1][0];</span>
+<span class="ln">    sem_init(&amp;sem, 0, 1);       /* 둘째 인자 0: 한 프로세스의 스레드 사이 */</span>
+<span class="ln"> </span>
+<span class="ln">    pthread_t t[64];</span>
+<span class="ln">    for (int i = 0; i &lt; nth; i++)</span>
+<span class="ln">        pthread_create(&amp;t[i], NULL, worker, NULL);</span>
+<span class="ln">    for (int i = 0; i &lt; nth; i++)</span>
+<span class="ln">        pthread_join(t[i], NULL);           /* 스레드가 끝나기를 기다린다 */</span>
+<span class="ln"> </span>
+<span class="ln">    printf(&quot;%-5s 스레드 %d개 × %ld번 → count = %ld (기대 %ld)\n&quot;, argv[1], nth,</span>
+<span class="ln">           n, count, nth * n);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="ringbuf.html">← ringbuf</a>
+    <a href="thqueue.html">thqueue →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

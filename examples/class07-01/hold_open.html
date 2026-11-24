@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>hold_open — 프로세스 기본: 주소 공간·상태·자원 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class07-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">7주차 1차시</a><span class="sep">/</span><span>hold_open</span></nav>
+  <header>
+    <h1>hold_open</h1>
+    <p>파일을 open한 채 지정한 초 동안 유지해 /proc/PID/fd에서 FD 표를 관찰하게 한다. open은 비어 있는 가장 작은 번호를 돌려준다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class07-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="echo hello &gt; hold.txt" title="터미널에서 실행" aria-label="실행: echo hello &gt; hold.txt">▶</button><code>echo hello &gt; hold.txt</code></div>
+          <p>열어 둘 파일 준비</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./hold_open hold.txt 3 &amp; sleep 1; ls -l /proc/$!/fd; wait" title="터미널에서 실행" aria-label="실행: ./hold_open hold.txt 3 &amp; sleep 1; ls -l /proc/$!/fd; wait">▶</button><code>./hold_open hold.txt 3 &amp; sleep 1; ls -l /proc/$!/fd; wait</code></div>
+          <p>0·1·2는 터미널, 3은 hold.txt를 가리킴. 끝나면 closed fd=3</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./hold_open hold.txt 3 &gt; out.txt &amp; sleep 1; ls -l /proc/$!/fd; wait; cat out.txt" title="터미널에서 실행" aria-label="실행: ./hold_open hold.txt 3 &gt; out.txt &amp; sleep 1; ls -l /proc/$!/fd; wait; cat out.txt">▶</button><code>./hold_open hold.txt 3 &gt; out.txt &amp; sleep 1; ls -l /proc/$!/fd; wait; cat out.txt</code></div>
+          <p>리다이렉션하면 fd 1이 out.txt를 가리킨다</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./hold_open hold.txt 1 &lt;&amp;-" title="터미널에서 실행" aria-label="실행: ./hold_open hold.txt 1 &lt;&amp;-">▶</button><code>./hold_open hold.txt 1 &lt;&amp;-</code></div>
+          <p>표준 입력을 닫고 실행하면 open이 0을 돌려준다(fd=0)</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./hold_open /no/such/file 1; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./hold_open /no/such/file 1; echo &quot;exit=$?&quot;">▶</button><code>./hold_open /no/such/file 1; echo &quot;exit=$?&quot;</code></div>
+          <p>open 실패: perror 메시지와 종료 상태 1</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="rm -f hold.txt out.txt" title="터미널에서 실행" aria-label="실행: rm -f hold.txt out.txt">▶</button><code>rm -f hold.txt out.txt</code></div>
+          <p>정리</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>hold_open.c <span class="muted">60줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* 파일을 열고 지정한 초 동안 유지하며 FD 표를 관찰하게 한다.</span>
+<span class="ln">   open은 남은 가장 작은 번호를 돌려주므로 표준 스트림(0·1·2)</span>
+<span class="ln">   만 열려 있으면 3이 돌아온다. 관찰 후 close로 반환한다.</span>
+<span class="ln">   실패 경로에서도 연 FD는 닫는 것이 3주차 이후의 반복 원칙이다. */</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc &lt; 2 || argc &gt; 3) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s FILE [seconds 1-600]\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    long seconds = 10;</span>
+<span class="ln">    if (argc == 3) {</span>
+<span class="ln">        char *end = NULL;</span>
+<span class="ln">        seconds = strtol(argv[2], &amp;end, 10);</span>
+<span class="ln">        if (end == argv[2] || *end != '\0' ||</span>
+<span class="ln">            seconds &lt; 1 || seconds &gt; 600) {</span>
+<span class="ln">            fprintf(stderr, &quot;usage: %s FILE [seconds 1-600]\n&quot;, argv[0]);</span>
+<span class="ln">            return 2;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    int fd = open(argv[1], O_RDONLY);</span>
+<span class="ln">    if (fd == -1) {</span>
+<span class="ln">        perror(argv[1]);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;pid=%ld fd=%d path=%s\n&quot;, (long)getpid(), fd, argv[1]);</span>
+<span class="ln">    printf(&quot;hold_seconds=%ld\n&quot;, seconds);</span>
+<span class="ln">    printf(&quot;observe: ls -l /proc/%ld/fd\n&quot;, (long)getpid());</span>
+<span class="ln">    printf(&quot;observe: ls /proc/%ld/fd | wc -l\n&quot;, (long)getpid());</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        close(fd);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    for (long done = 1; done &lt;= seconds; done++) {</span>
+<span class="ln">        sleep(1);</span>
+<span class="ln">        printf(&quot;hold=%ld of %ld\n&quot;, done, seconds);</span>
+<span class="ln">        if (fflush(stdout) == EOF) {</span>
+<span class="ln">            perror(&quot;stdout&quot;);</span>
+<span class="ln">            close(fd);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    if (close(fd) == -1) {</span>
+<span class="ln">        perror(&quot;close&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;closed fd=%d\n&quot;, fd);</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="state_show.html">← state_show</a>
+    <a href="procdump.html">procdump →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

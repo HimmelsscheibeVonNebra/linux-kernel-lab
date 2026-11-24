@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ringbuf — 공유 메모리 · 세마포어 · 스레드 동기화 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class13-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">13주차 2차시</a><span class="sep">/</span><span>ringbuf</span></nav>
+  <header>
+    <h1>ringbuf</h1>
+    <p>공유 메모리에 놓은 8칸 원형 버퍼와 세마포어 셋(slots · items · mutex)으로 프로세스 사이의 생산자–소비자를 만듭니다. 가득 차면 생산자가, 비면 소비자가 잠듭니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class13-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./ringbuf rm 2&gt;/dev/null; ./ringbuf init; ./ringbuf stat" title="터미널에서 실행" aria-label="실행: ./ringbuf rm 2&gt;/dev/null; ./ringbuf init; ./ringbuf stat">▶</button><code>./ringbuf rm 2&gt;/dev/null; ./ringbuf init; ./ringbuf stat</code></div>
+          <p>버퍼와 세마포어를 만든다. 처음에는 빈 칸 8 · 든 칸 0.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./ringbuf put 1 12 &amp; sleep 1; ./ringbuf stat" title="터미널에서 실행" aria-label="실행: ./ringbuf put 1 12 &amp; sleep 1; ./ringbuf stat">▶</button><code>./ringbuf put 1 12 &amp; sleep 1; ./ringbuf stat</code></div>
+          <p>생산자가 1~8을 넣고 9번째에서 빈 칸이 없어 잠든다. stat은 빈 칸 0 · 든 칸 8.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./ringbuf get 12; wait" title="터미널에서 실행" aria-label="실행: ./ringbuf get 12; wait">▶</button><code>./ringbuf get 12; wait</code></div>
+          <p>소비자가 꺼내기 시작하면 생산자가 깨어나 나머지(9~12)를 넣는다. 1~12가 순서대로 나오고 합 = 78.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./ringbuf get 3 &amp; sleep 1; ./ringbuf put 7 3; wait" title="터미널에서 실행" aria-label="실행: ./ringbuf get 3 &amp; sleep 1; ./ringbuf put 7 3; wait">▶</button><code>./ringbuf get 3 &amp; sleep 1; ./ringbuf put 7 3; wait</code></div>
+          <p>반대로 빈 버퍼에서는 소비자가 잠든다. 7, 8, 9가 들어오자 깨어나 합 = 24를 출력한다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./ringbuf stat; ./ringbuf rm" title="터미널에서 실행" aria-label="실행: ./ringbuf stat; ./ringbuf rm">▶</button><code>./ringbuf stat; ./ringbuf rm</code></div>
+          <p>모두 꺼냈으므로 다시 빈 칸 8 · 든 칸 0. 마지막에 이름을 지운다.</p>
+        </li>
+      </ol>
+      <p class="callout">32비트라 struct ring은 88바이트로 출력됩니다 (64비트에서는 더 큽니다).</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>ringbuf.c <span class="muted">77줄</span></summary>
+      <pre class="code"><code><span class="ln">/* ringbuf.c — 공유 메모리의 원형 버퍼로 만드는 생산자–소비자</span>
+<span class="ln"> *   ./ringbuf init                 버퍼(8칸)와 세마포어 셋을 만든다</span>
+<span class="ln"> *   ./ringbuf put START COUNT [MS] START부터 COUNT개를 넣는다 (MS: 사이 쉬는 시간)</span>
+<span class="ln"> *   ./ringbuf get COUNT [MS]       COUNT개를 꺼내 합을 출력한다</span>
+<span class="ln"> *   ./ringbuf stat                 빈 칸 · 든 칸의 수</span>
+<span class="ln"> *   ./ringbuf rm                   이름을 지운다</span>
+<span class="ln"> */</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &quot;ring.h&quot;</span>
+<span class="ln"> </span>
+<span class="ln">static void put(struct ring *r, long v)</span>
+<span class="ln">{</span>
+<span class="ln">    sem_wait(&amp;r-&gt;slots);            /* 빈 칸이 생길 때까지 기다린다 */</span>
+<span class="ln">    sem_wait(&amp;r-&gt;mutex);            /* 버퍼를 잠근다 */</span>
+<span class="ln">    r-&gt;buf[r-&gt;tail] = v;</span>
+<span class="ln">    r-&gt;tail = (r-&gt;tail + 1) % RING_SIZE;</span>
+<span class="ln">    sem_post(&amp;r-&gt;mutex);</span>
+<span class="ln">    sem_post(&amp;r-&gt;items);            /* 든 칸 +1: 소비자를 깨운다 */</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static long get(struct ring *r)</span>
+<span class="ln">{</span>
+<span class="ln">    sem_wait(&amp;r-&gt;items);            /* 든 칸이 생길 때까지 기다린다 */</span>
+<span class="ln">    sem_wait(&amp;r-&gt;mutex);</span>
+<span class="ln">    long v = r-&gt;buf[r-&gt;head];</span>
+<span class="ln">    r-&gt;head = (r-&gt;head + 1) % RING_SIZE;</span>
+<span class="ln">    sem_post(&amp;r-&gt;mutex);</span>
+<span class="ln">    sem_post(&amp;r-&gt;slots);            /* 빈 칸 +1: 생산자를 깨운다 */</span>
+<span class="ln">    return v;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    const char *cmd = argc &gt; 1 ? argv[1] : &quot;&quot;;</span>
+<span class="ln">    setvbuf(stdout, NULL, _IOLBF, 0);</span>
+<span class="ln"> </span>
+<span class="ln">    if (!strcmp(cmd, &quot;init&quot;) &amp;&amp; argc == 2) {</span>
+<span class="ln">        struct ring *r = ring_attach(1);</span>
+<span class="ln">        sem_init(&amp;r-&gt;slots, 1, RING_SIZE);  /* 둘째 인자 1: 프로세스 사이 공유 */</span>
+<span class="ln">        sem_init(&amp;r-&gt;items, 1, 0);</span>
+<span class="ln">        sem_init(&amp;r-&gt;mutex, 1, 1);</span>
+<span class="ln">        r-&gt;head = r-&gt;tail = 0;</span>
+<span class="ln">        printf(&quot;만듦: %s (%d칸, %zu바이트)\n&quot;, RING_NAME, RING_SIZE, sizeof *r);</span>
+<span class="ln">    } else if (!strcmp(cmd, &quot;put&quot;) &amp;&amp; (argc == 4 || argc == 5)) {</span>
+<span class="ln">        struct ring *r = ring_attach(0);</span>
+<span class="ln">        long start = atol(argv[2]), n = atol(argv[3]);</span>
+<span class="ln">        for (long i = 0; i &lt; n; i++) {</span>
+<span class="ln">            put(r, start + i);</span>
+<span class="ln">            printf(&quot;[%d] 넣음 %ld\n&quot;, (int)getpid(), start + i);</span>
+<span class="ln">            if (argc == 5) usleep((useconds_t)atoi(argv[4]) * 1000);</span>
+<span class="ln">        }</span>
+<span class="ln">    } else if (!strcmp(cmd, &quot;get&quot;) &amp;&amp; (argc == 3 || argc == 4)) {</span>
+<span class="ln">        struct ring *r = ring_attach(0);</span>
+<span class="ln">        long n = atol(argv[2]), sum = 0;</span>
+<span class="ln">        for (long i = 0; i &lt; n; i++) {</span>
+<span class="ln">            long v = get(r);</span>
+<span class="ln">            sum += v;</span>
+<span class="ln">            printf(&quot;[%d] 꺼냄 %ld\n&quot;, (int)getpid(), v);</span>
+<span class="ln">            if (argc == 4) usleep((useconds_t)atoi(argv[3]) * 1000);</span>
+<span class="ln">        }</span>
+<span class="ln">        printf(&quot;[%d] %ld개의 합 = %ld\n&quot;, (int)getpid(), n, sum);</span>
+<span class="ln">    } else if (!strcmp(cmd, &quot;stat&quot;) &amp;&amp; argc == 2) {</span>
+<span class="ln">        struct ring *r = ring_attach(0);</span>
+<span class="ln">        int slots, items;</span>
+<span class="ln">        sem_getvalue(&amp;r-&gt;slots, &amp;slots);</span>
+<span class="ln">        sem_getvalue(&amp;r-&gt;items, &amp;items);</span>
+<span class="ln">        printf(&quot;빈 칸 %d · 든 칸 %d\n&quot;, slots, items);</span>
+<span class="ln">    } else if (!strcmp(cmd, &quot;rm&quot;) &amp;&amp; argc == 2) {</span>
+<span class="ln">        if (shm_unlink(RING_NAME) == -1) { perror(&quot;shm_unlink&quot;); return 1; }</span>
+<span class="ln">        printf(&quot;지움: %s\n&quot;, RING_NAME);</span>
+<span class="ln">    } else {</span>
+<span class="ln">        fprintf(stderr, &quot;사용법: %s init | put START COUNT [MS] | get COUNT [MS]&quot;</span>
+<span class="ln">                        &quot; | stat | rm\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+    <details class="source">
+      <summary>ring.h <span class="muted">40줄</span></summary>
+      <pre class="code"><code><span class="ln">/* ring.h — 공유 메모리에 놓는 원형 버퍼와 세마포어 셋 */</span>
+<span class="ln">#ifndef RING_H</span>
+<span class="ln">#define RING_H</span>
+<span class="ln"> </span>
+<span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;semaphore.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;sys/mman.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">#define RING_NAME &quot;/w13_ring&quot;</span>
+<span class="ln">#define RING_SIZE 8</span>
+<span class="ln"> </span>
+<span class="ln">struct ring {</span>
+<span class="ln">    sem_t slots;                /* 빈 칸의 수: 처음에 RING_SIZE */</span>
+<span class="ln">    sem_t items;                /* 든 칸의 수: 처음에 0 */</span>
+<span class="ln">    sem_t mutex;                /* head · tail · buf를 지키는 잠금: 처음에 1 */</span>
+<span class="ln">    int   head;                 /* 다음에 꺼낼 자리 */</span>
+<span class="ln">    int   tail;                 /* 다음에 넣을 자리 */</span>
+<span class="ln">    long  buf[RING_SIZE];</span>
+<span class="ln">};</span>
+<span class="ln"> </span>
+<span class="ln">static inline struct ring *ring_attach(int create)</span>
+<span class="ln">{</span>
+<span class="ln">    int flags = create ? O_CREAT | O_EXCL | O_RDWR : O_RDWR;</span>
+<span class="ln">    int fd = shm_open(RING_NAME, flags, 0600);</span>
+<span class="ln">    if (fd == -1) { perror(&quot;shm_open&quot;); exit(1); }</span>
+<span class="ln">    if (create &amp;&amp; ftruncate(fd, sizeof(struct ring)) == -1) {</span>
+<span class="ln">        perror(&quot;ftruncate&quot;);</span>
+<span class="ln">        exit(1);</span>
+<span class="ln">    }</span>
+<span class="ln">    struct ring *r = mmap(NULL, sizeof *r, PROT_READ | PROT_WRITE,</span>
+<span class="ln">                          MAP_SHARED, fd, 0);</span>
+<span class="ln">    if (r == MAP_FAILED) { perror(&quot;mmap&quot;); exit(1); }</span>
+<span class="ln">    close(fd);</span>
+<span class="ln">    return r;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">#endif</span></code></pre>
+    </details>
+  </section>
+  <nav class="pager">
+    <a href="semcount.html">← semcount</a>
+    <a href="thcount.html">thcount →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

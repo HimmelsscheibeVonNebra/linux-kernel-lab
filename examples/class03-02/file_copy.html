@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>file_copy — 견고한 I/O와 파일 복사 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class03-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">3주차 2차시</a><span class="sep">/</span><span>file_copy</span></nav>
+  <header>
+    <h1>file_copy</h1>
+    <p>4096바이트 버퍼로 read한 만큼 write_all로 새 파일에 기록해 복사한다. 목적지는 O_CREAT | O_EXCL로 열기 때문에 기존 파일을 덮어쓰지 않는다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class03-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="printf 'ABCDEFGHIJ\n' &gt; in.txt; rm -f copy.txt; ./file_copy in.txt copy.txt; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: printf 'ABCDEFGHIJ\n' &gt; in.txt; rm -f copy.txt; ./file_copy in.txt copy.txt; echo &quot;exit=$?&quot;">▶</button><code>printf 'ABCDEFGHIJ\n' &gt; in.txt; rm -f copy.txt; ./file_copy in.txt copy.txt; echo &quot;exit=$?&quot;</code></div>
+          <p>첫 복사는 성공한다(상태 0).</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="cat copy.txt; wc -c in.txt copy.txt" title="터미널에서 실행" aria-label="실행: cat copy.txt; wc -c in.txt copy.txt">▶</button><code>cat copy.txt; wc -c in.txt copy.txt</code></div>
+          <p>내용과 크기(11바이트)가 원본과 같다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./file_copy in.txt copy.txt; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./file_copy in.txt copy.txt; echo &quot;exit=$?&quot;">▶</button><code>./file_copy in.txt copy.txt; echo &quot;exit=$?&quot;</code></div>
+          <p>목적지가 이미 있으면 File exists로 실패(상태 1)하고 기존 파일은 보존된다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./file_copy missing.txt new.txt; echo &quot;exit=$?&quot;; ls new.txt" title="터미널에서 실행" aria-label="실행: ./file_copy missing.txt new.txt; echo &quot;exit=$?&quot;; ls new.txt">▶</button><code>./file_copy missing.txt new.txt; echo &quot;exit=$?&quot;; ls new.txt</code></div>
+          <p>입력이 없으면 목적지를 만들기 전에 실패하므로 new.txt는 생기지 않는다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="dd if=/dev/zero of=big.bin bs=1000 count=10 2&gt;/dev/null; rm -f big.copy; strace -e trace=openat,read,write,close ./file_copy big.bin big.copy" title="터미널에서 실행" aria-label="실행: dd if=/dev/zero of=big.bin bs=1000 count=10 2&gt;/dev/null; rm -f big.copy; strace -e trace=openat,read,write,close ./file_copy big.bin big.copy">▶</button><code>dd if=/dev/zero of=big.bin bs=1000 count=10 2&gt;/dev/null; rm -f big.copy; strace -e trace=openat,read,write,close ./file_copy big.bin big.copy</code></div>
+          <p>10000바이트를 4096, 4096, 1808, 0 순서로 읽고 같은 길이만큼 쓰는 것을 확인한다. 앞부분은 라이브러리 로딩이다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="wc -c big.bin big.copy" title="터미널에서 실행" aria-label="실행: wc -c big.bin big.copy">▶</button><code>wc -c big.bin big.copy</code></div>
+          <p>두 파일 모두 10000바이트다.</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>file_copy.c <span class="muted">45줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln">#ifdef STUDENT</span>
+<span class="ln">#include &quot;student/io_helpers.h&quot;</span>
+<span class="ln">#else</span>
+<span class="ln">#include &quot;io_helpers.h&quot;</span>
+<span class="ln">#endif</span>
+<span class="ln">/* Caller owns both descriptors. Copy bytes, not metadata. */</span>
+<span class="ln">static int copy_fd(int in, int out)</span>
+<span class="ln">{</span>
+<span class="ln">    unsigned char buf[4096];</span>
+<span class="ln">    for (;;) {</span>
+<span class="ln">        ssize_t n = read(in, buf, sizeof buf);</span>
+<span class="ln">        if (n == 0) return 0;</span>
+<span class="ln">        if (n == -1) {</span>
+<span class="ln">            if (errno == EINTR) continue;</span>
+<span class="ln">            return -1;</span>
+<span class="ln">        }</span>
+<span class="ln">        if (write_all(out, buf, (size_t)n) == -1) return -1;</span>
+<span class="ln">    }</span>
+<span class="ln">}</span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc != 3) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s INPUT NEW_OUTPUT\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    int in = open(argv[1], O_RDONLY);</span>
+<span class="ln">    if (in == -1) { perror(argv[1]); return 1; }</span>
+<span class="ln">    int out = open(argv[2], O_WRONLY | O_CREAT | O_EXCL, 0666);</span>
+<span class="ln">    if (out == -1) {</span>
+<span class="ln">        perror(argv[2]);</span>
+<span class="ln">        if (close(in) == -1) perror(&quot;close input&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    int status = 0;</span>
+<span class="ln">    if (copy_fd(in, out) == -1) {</span>
+<span class="ln">        perror(&quot;copy&quot;); status = 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (close(in) == -1) { perror(&quot;close input&quot;); status = 1; }</span>
+<span class="ln">    if (close(out) == -1) { perror(&quot;close output&quot;); status = 1; }</span>
+<span class="ln">    return status;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+    <details class="source">
+      <summary>io_helpers.h <span class="muted">22줄</span></summary>
+      <pre class="code"><code><span class="ln">#ifndef IO_HELPERS_H</span>
+<span class="ln">#define IO_HELPERS_H</span>
+<span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;stddef.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln">/* Blocking descriptors. Retry interruptions and advance after partial writes. */</span>
+<span class="ln">static int write_all(int fd, const void *data, size_t count)</span>
+<span class="ln">{</span>
+<span class="ln">    const unsigned char *p = data;</span>
+<span class="ln">    while (count &gt; 0) {</span>
+<span class="ln">        ssize_t n = write(fd, p, count);</span>
+<span class="ln">        if (n == -1) {</span>
+<span class="ln">            if (errno == EINTR) continue;</span>
+<span class="ln">            return -1;</span>
+<span class="ln">        }</span>
+<span class="ln">        if (n == 0) { errno = EIO; return -1; }</span>
+<span class="ln">        p += (size_t)n;</span>
+<span class="ln">        count -= (size_t)n;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln">#endif</span></code></pre>
+    </details>
+  </section>
+  <nav class="pager">
+    <span></span>
+    <a href="read_chunks.html">read_chunks →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

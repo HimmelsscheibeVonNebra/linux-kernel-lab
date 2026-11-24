@@ -1,0 +1,77 @@
+{
+  "class": "class07-01",
+  "title": "프로세스 기본: 주소 공간·상태·자원",
+  "summary": "/proc와 표준 API로 프로세스의 가상 주소 공간, 실행 상태(S·R·T), FD 표, 자원 한계와 사용량을 직접 관찰한다.",
+  "examples": [
+    {
+      "name": "addr_show",
+      "source": "addr_show.c",
+      "summary": "전역(data·bss)·정적·지역(stack)·malloc(heap) 변수의 가상 주소를 출력하고, 지정한 초 동안 살아 있어 /proc/PID/maps와 대조할 수 있게 한다.",
+      "steps": [
+        { "cmd": "./addr_show", "note": "data·bss·stack·heap 주소가 서로 다른 구역에 있음을 확인" },
+        { "cmd": "./addr_show | grep heap; ./addr_show | grep heap", "note": "실행할 때마다 주소 값이 달라지는지(ASLR) 비교" },
+        { "cmd": "./addr_show 3 & sleep 1; grep -E 'addr_show|heap|stack' /proc/$!/maps; wait", "note": "출력된 주소가 maps의 어느 행(실행 파일·[heap]·[stack])에 속하는지 대조" },
+        { "cmd": "./addr_show extra; echo \"exit=$?\"", "note": "잘못된 인자는 usage와 종료 상태 2" }
+      ],
+      "manual": false,
+      "expect": "hold_seconds=0",
+      "notes": "32비트(i686) 게스트라 주소가 8자리 16진수이고 스택은 3GB 경계 아래(0xbf…/0xff… 부근)에 나타난다. 교안의 x86-64 주소 값과는 다르다."
+    },
+    {
+      "name": "maps_show",
+      "source": "maps_show.c",
+      "summary": "/proc/self/maps를 getline으로 읽어 [heap]·[stack] 행을 출력하고 전체 구역 수와 .so 매핑 수를 센다.",
+      "steps": [
+        { "cmd": "./maps_show", "note": "heap_region·stack_region 행과 regions/so_regions 개수 확인" },
+        { "cmd": "cat /proc/self/maps | wc -l", "note": "cat 자신의 구역 수와 비교(프로그램마다 다르다)" },
+        { "cmd": "./maps_show x; echo \"exit=$?\"", "note": "인자를 주면 usage, 종료 상태 2" }
+      ],
+      "manual": false,
+      "expect": "stack_regions=1",
+      "notes": "구역 수는 32비트 glibc 환경 기준이라 교안(x86-64)의 숫자와 다를 수 있다."
+    },
+    {
+      "name": "state_show",
+      "source": "state_show.c",
+      "summary": "sleep으로 잠드는 모드(S)와 CPU를 놓지 않는 --busy 모드(R)를 만들어 /proc/PID/status의 State를 관찰하게 한다.",
+      "steps": [
+        { "cmd": "./state_show 2", "note": "pid와 관찰 명령 안내, 1초마다 tick 출력" },
+        { "cmd": "./state_show 4 > /dev/null & sleep 1; grep State /proc/$!/status; wait", "note": "잠자는 동안 State: S (sleeping)" },
+        { "cmd": "./state_show --busy 4 > /dev/null & sleep 1; grep State /proc/$!/status; wait", "note": "바쁜 대기 중에는 State: R (running)" },
+        { "cmd": "./state_show 5 > /dev/null & sleep 1; kill -STOP $!; sleep 1; grep State /proc/$!/status; kill -CONT $!; wait", "note": "SIGSTOP으로 멈추면 State: T (stopped), SIGCONT로 재개" }
+      ],
+      "manual": false,
+      "expect": "T (stopped)",
+      "notes": "프로그램이 안내하는 'ps -o … -p PID'는 BusyBox ps가 -p를 지원하지 않으므로 /proc/PID/status로 대신 본다. CPU가 1개라 --busy 실행 중에는 셸 반응이 조금 느려질 수 있다."
+    },
+    {
+      "name": "hold_open",
+      "source": "hold_open.c",
+      "summary": "파일을 open한 채 지정한 초 동안 유지해 /proc/PID/fd에서 FD 표를 관찰하게 한다. open은 비어 있는 가장 작은 번호를 돌려준다.",
+      "steps": [
+        { "cmd": "echo hello > hold.txt", "note": "열어 둘 파일 준비" },
+        { "cmd": "./hold_open hold.txt 3 & sleep 1; ls -l /proc/$!/fd; wait", "note": "0·1·2는 터미널, 3은 hold.txt를 가리킴. 끝나면 closed fd=3" },
+        { "cmd": "./hold_open hold.txt 3 > out.txt & sleep 1; ls -l /proc/$!/fd; wait; cat out.txt", "note": "리다이렉션하면 fd 1이 out.txt를 가리킨다" },
+        { "cmd": "./hold_open hold.txt 1 <&-", "note": "표준 입력을 닫고 실행하면 open이 0을 돌려준다(fd=0)" },
+        { "cmd": "./hold_open /no/such/file 1; echo \"exit=$?\"", "note": "open 실패: perror 메시지와 종료 상태 1" },
+        { "cmd": "rm -f hold.txt out.txt", "note": "정리" }
+      ],
+      "manual": false,
+      "expect": "No such file or directory"
+    },
+    {
+      "name": "procdump",
+      "source": "procdump.c",
+      "summary": "getpid/getuid, getrlimit, getrusage와 /proc/self/status·/proc/self/fd를 묶어 프로세스의 신원·자원 한계·사용량을 한 보고서로 출력한다.",
+      "steps": [
+        { "cmd": "./procdump", "note": "pid/ppid, uid, rlimit, CPU 시간, maxrss, State·VmSize·VmRSS, fd_count 확인" },
+        { "cmd": "echo $$; id -u", "note": "ppid가 셸의 PID, uid가 1000(student)과 같은지 대조" },
+        { "cmd": "(ulimit -n 64; ./procdump | grep nofile)", "note": "서브셸에서 낮춘 한계가 자식에게 상속됨(rlimit_nofile=64)" },
+        { "cmd": "./procdump < /dev/null | grep fd_count", "note": "fd_count=4: 표준 3개 + 스캔용 디렉터리 FD 1개" }
+      ],
+      "manual": false,
+      "expect": "includes_scan_fd=yes",
+      "notes": "root가 아니라 uid=euid=1000으로 나온다. 32비트 프로세스라 VmSize가 수 MB 수준으로 작다."
+    }
+  ]
+}

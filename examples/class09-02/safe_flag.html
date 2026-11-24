@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>safe_flag — 시그널 심화: 블록·보류·sigsuspend·안전한 핸들러 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class09-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">9주차 2차시</a><span class="sep">/</span><span>safe_flag</span></nav>
+  <header>
+    <h1>safe_flag</h1>
+    <p>핸들러에서 errno를 저장·복원하고 write와 volatile sig_atomic_t 플래그만 쓰는 async-signal-safe 규범을 보여 준다. 보고는 main이 플래그를 보고 한다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class09-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./safe_flag self 3" title="터미널에서 실행" aria-label="실행: ./safe_flag self 3">▶</button><code>./safe_flag self 3</code></div>
+          <p>raise할 때마다 핸들러가 실행되어 flag가 1씩 증가, errno(77)는 보존된다</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./safe_flag wait 3 &amp; sleep 1; kill -INT $!; wait" title="터미널에서 실행" aria-label="실행: ./safe_flag wait 3 &amp; sleep 1; kill -INT $!; wait">▶</button><code>./safe_flag wait 3 &amp; sleep 1; kill -INT $!; wait</code></div>
+          <p>대기 중 받은 SIGINT를 센다: received 1 SIGINT in 3s</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./safe_flag wait 2" title="터미널에서 실행" aria-label="실행: ./safe_flag wait 2">▶</button><code>./safe_flag wait 2</code></div>
+          <p>시그널이 없으면 received 0</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./safe_flag self 100; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./safe_flag self 100; echo &quot;exit=$?&quot;">▶</button><code>./safe_flag self 100; echo &quot;exit=$?&quot;</code></div>
+          <p>범위 밖 N은 usage, 종료 상태 2</p>
+        </li>
+      </ol>
+      <p class="callout">직접 해 보려면 ./safe_flag wait 5 를 실행하고 Ctrl-C를 여러 번 누른다(종료되지 않고 횟수만 센다).</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>safe_flag.c <span class="muted">88줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;signal.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;time.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* async-signal-safe 핸들러 규범입니다. 신호는 어느 코드 사이에든</span>
+<span class="ln">   끼어들 수 있으므로 핸들러는 아주 조심해야 합니다: errno를</span>
+<span class="ln">   저장·복원하고, write()만 부르고, volatile sig_atomic_t 플래그만</span>
+<span class="ln">   고칩니다. printf는 내부 잠금과 stdio 버퍼 상태를 만지므로</span>
+<span class="ln">   핸들러 안에서 부르면 잠금 교착이나 뒤섞인 출력을 낳을 수</span>
+<span class="ln">   있습니다. 보고는 전부 main이 플래그를 보고 합니다.</span>
+<span class="ln">   self N : 자기에게 SIGINT를 N번 raise하고 플래그 전이를 봅니다.</span>
+<span class="ln">   wait N : N초 동안 Ctrl-C를 기다렸다가 받은 횟수를 보고합니다. */</span>
+<span class="ln"> </span>
+<span class="ln">static volatile sig_atomic_t ints = 0;</span>
+<span class="ln"> </span>
+<span class="ln">static void on_int(int sig)</span>
+<span class="ln">{</span>
+<span class="ln">    int saved = errno;          /* 끼어들기 전의 errno를 지킨다 */</span>
+<span class="ln">    static const char msg[] = &quot;  [handler] SIGINT\n&quot;;</span>
+<span class="ln">    (void)sig;</span>
+<span class="ln">    ssize_t r = write(STDOUT_FILENO, msg, sizeof msg - 1);</span>
+<span class="ln">    (void)r;</span>
+<span class="ln">    ints++;                     /* 플래그에 한 번의 덧셈만 한다 */</span>
+<span class="ln">    errno = saved;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static double now(void)</span>
+<span class="ln">{</span>
+<span class="ln">    struct timespec ts;</span>
+<span class="ln">    clock_gettime(CLOCK_MONOTONIC, &amp;ts);</span>
+<span class="ln">    return ts.tv_sec + ts.tv_nsec / 1e9;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    long n = 0;</span>
+<span class="ln">    if (argc == 3) {</span>
+<span class="ln">        char *end = NULL;</span>
+<span class="ln">        n = strtol(argv[2], &amp;end, 10);</span>
+<span class="ln">        if (end == argv[2] || *end != '\0' || n &lt; 1 || n &gt; 99)</span>
+<span class="ln">            n = -1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (n == -1 || argc != 3</span>
+<span class="ln">        || (strcmp(argv[1], &quot;self&quot;) != 0 &amp;&amp; strcmp(argv[1], &quot;wait&quot;) != 0)) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s self N(1-99) | wait N(1-99) seconds\n&quot;,</span>
+<span class="ln">                argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    struct sigaction sa;</span>
+<span class="ln">    memset(&amp;sa, 0, sizeof sa);</span>
+<span class="ln">    sa.sa_handler = on_int;</span>
+<span class="ln">    sigemptyset(&amp;sa.sa_mask);</span>
+<span class="ln">    if (sigaction(SIGINT, &amp;sa, NULL) == -1) {</span>
+<span class="ln">        perror(&quot;sigaction&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (strcmp(argv[1], &quot;self&quot;) == 0) {</span>
+<span class="ln">        errno = 77;             /* 관찰용 임의 값 */</span>
+<span class="ln">        for (long i = 1; i &lt;= n; i++) {</span>
+<span class="ln">            raise(SIGINT);      /* 블록되지 않았으므로 raise 안에서 전달 */</span>
+<span class="ln">            if (ints == i)</span>
+<span class="ln">                printf(&quot;main: saw flag=%d after raise #%ld\n&quot;, (int)ints, i);</span>
+<span class="ln">            else</span>
+<span class="ln">                printf(&quot;main: flag=%d expected %ld?!\n&quot;, (int)ints, i);</span>
+<span class="ln">        }</span>
+<span class="ln">        int preserved = (errno == 77);</span>
+<span class="ln">        printf(&quot;errno preserved across handler: %s (expected %d)\n&quot;,</span>
+<span class="ln">               preserved ? &quot;yes&quot; : &quot;NO&quot;, 77);</span>
+<span class="ln">        printf(&quot;total ints=%d\n&quot;, (int)ints);</span>
+<span class="ln">    } else {</span>
+<span class="ln">        printf(&quot;pid=%ld waiting %lds for Ctrl-C\n&quot;, (long)getpid(), n);</span>
+<span class="ln">        fflush(stdout);</span>
+<span class="ln">        double t0 = now();</span>
+<span class="ln">        long seen = 0;</span>
+<span class="ln">        while (now() - t0 &lt; (double)n) {</span>
+<span class="ln">            sleep(1);           /* Ctrl-C가 오면 일찍 돌아온다 */</span>
+<span class="ln">            if (ints &gt; seen) {</span>
+<span class="ln">                seen = ints;</span>
+<span class="ln">                printf(&quot;tick %.0fs: received=%ld\n&quot;, now() - t0, seen);</span>
+<span class="ln">            }</span>
+<span class="ln">        }</span>
+<span class="ln">        printf(&quot;received %d SIGINT in %lds\n&quot;, (int)ints, n);    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="suspend_demo.html">← suspend_demo</a>
+    <a href="chld_reap.html">chld_reap →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

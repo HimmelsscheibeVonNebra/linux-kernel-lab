@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pmq — IPC와 POSIX 메시지 큐 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class13-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">13주차 1차시</a><span class="sep">/</span><span>pmq</span></nav>
+  <header>
+    <h1>pmq</h1>
+    <p>POSIX 메시지 큐를 명령 하나씩으로 다룹니다: mq_open(O_CREAT | O_EXCL)으로 만들고, mq_send로 우선순위와 함께 넣고, mq_receive로 꺼내고, mq_getattr로 상태를 보고, mq_unlink로 지웁니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class13-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pmq unlink /lab 2&gt;/dev/null; ./pmq create /lab; ls -l /dev/mqueue" title="터미널에서 실행" aria-label="실행: ./pmq unlink /lab 2&gt;/dev/null; ./pmq create /lab; ls -l /dev/mqueue">▶</button><code>./pmq unlink /lab 2&gt;/dev/null; ./pmq create /lab; ls -l /dev/mqueue</code></div>
+          <p>큐를 만든다 (기본 maxmsg=10, msgsize=128). 프로세스가 끝나도 이름이 /dev/mqueue/lab 으로 남아 있다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pmq send /lab 1 low-a; ./pmq send /lab 5 urgent; ./pmq send /lab 1 low-b; ./pmq stat /lab" title="터미널에서 실행" aria-label="실행: ./pmq send /lab 1 low-a; ./pmq send /lab 5 urgent; ./pmq send /lab 1 low-b; ./pmq stat /lab">▶</button><code>./pmq send /lab 1 low-a; ./pmq send /lab 5 urgent; ./pmq send /lab 1 low-b; ./pmq stat /lab</code></div>
+          <p>우선순위 1, 5, 1로 세 개를 넣는다. stat에서 curmsgs=3.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="cat /dev/mqueue/lab" title="터미널에서 실행" aria-label="실행: cat /dev/mqueue/lab">▶</button><code>cat /dev/mqueue/lab</code></div>
+          <p>커널이 보여 주는 큐 상태: QSIZE는 쌓인 바이트 수(5 + 6 + 5 = 16)다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pmq recv /lab; ./pmq recv /lab; ./pmq recv /lab" title="터미널에서 실행" aria-label="실행: ./pmq recv /lab; ./pmq recv /lab; ./pmq recv /lab">▶</button><code>./pmq recv /lab; ./pmq recv /lab; ./pmq recv /lab</code></div>
+          <p>넣은 순서가 아니라 우선순위가 높은 urgent(prio=5)가 먼저 나오고, 같은 우선순위끼리는 넣은 순서(low-a, low-b)다. len은 보낸 길이 그대로다 (메시지 경계 유지).</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pmq recv /lab -n; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./pmq recv /lab -n; echo &quot;exit=$?&quot;">▶</button><code>./pmq recv /lab -n; echo &quot;exit=$?&quot;</code></div>
+          <p>빈 큐에서 O_NONBLOCK으로 꺼내면 기다리지 않고 EAGAIN(Resource temporarily unavailable)으로 실패한다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./pmq recv /lab &amp; sleep 1; ./pmq send /lab 2 wake; wait; ./pmq unlink /lab" title="터미널에서 실행" aria-label="실행: ./pmq recv /lab &amp; sleep 1; ./pmq send /lab 2 wake; wait; ./pmq unlink /lab">▶</button><code>./pmq recv /lab &amp; sleep 1; ./pmq send /lab 2 wake; wait; ./pmq unlink /lab</code></div>
+          <p>-n 없이 꺼내면 빈 큐에서 잠든다. 1초 뒤 메시지가 들어오자 깨어나 wake를 받는다. 마지막에 이름을 지운다.</p>
+        </li>
+      </ol>
+      <p class="callout">큐 이름은 반드시 /로 시작해야 합니다. 일반 사용자는 /proc/sys/fs/mqueue의 한도(msg_max 10, msgsize_max 8192)를 넘는 큐를 만들 수 없습니다 (예: ./pmq create /big 100000 128 → Invalid argument).</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>pmq.c <span class="muted">92줄</span></summary>
+      <pre class="code"><code><span class="ln">/* pmq.c — POSIX 메시지 큐를 명령 하나씩으로 다룬다</span>
+<span class="ln"> *   ./pmq create /NAME [MAXMSG MSGSIZE]   큐를 만든다 (기본 10개, 128바이트)</span>
+<span class="ln"> *   ./pmq send   /NAME PRIO TEXT          메시지 하나를 넣는다</span>
+<span class="ln"> *   ./pmq recv   /NAME [-n]               메시지 하나를 꺼낸다 (-n: 기다리지 않음)</span>
+<span class="ln"> *   ./pmq stat   /NAME                    속성과 쌓인 개수를 본다</span>
+<span class="ln"> *   ./pmq unlink /NAME                    이름을 지운다</span>
+<span class="ln"> */</span>
+<span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;mqueue.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">static void die(const char *what) { perror(what); exit(1); }</span>
+<span class="ln"> </span>
+<span class="ln">static void do_create(const char *name, long maxmsg, long msgsize)</span>
+<span class="ln">{</span>
+<span class="ln">    struct mq_attr attr = { .mq_maxmsg = maxmsg, .mq_msgsize = msgsize };</span>
+<span class="ln">    /* O_EXCL: 같은 이름이 이미 있으면 EEXIST로 실패한다 */</span>
+<span class="ln">    mqd_t q = mq_open(name, O_CREAT | O_EXCL | O_RDWR, 0600, &amp;attr);</span>
+<span class="ln">    if (q == (mqd_t)-1) die(&quot;mq_open&quot;);</span>
+<span class="ln">    printf(&quot;만듦: %s (maxmsg=%ld, msgsize=%ld)\n&quot;, name, maxmsg, msgsize);</span>
+<span class="ln">    mq_close(q);                        /* 닫아도 큐와 이름은 남는다 */</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void do_send(const char *name, unsigned prio, const char *text)</span>
+<span class="ln">{</span>
+<span class="ln">    mqd_t q = mq_open(name, O_WRONLY);  /* 만든 프로세스가 아니어도 된다 */</span>
+<span class="ln">    if (q == (mqd_t)-1) die(&quot;mq_open&quot;);</span>
+<span class="ln"> </span>
+<span class="ln">    /* 메시지 하나 = 바이트 덩어리 + 우선순위. 가득 차 있으면 기다린다 */</span>
+<span class="ln">    if (mq_send(q, text, strlen(text), prio) == -1) die(&quot;mq_send&quot;);</span>
+<span class="ln">    printf(&quot;[%d] 보냄: prio=%u len=%zu \&quot;%s\&quot;\n&quot;, (int)getpid(), prio,</span>
+<span class="ln">           strlen(text), text);</span>
+<span class="ln">    mq_close(q);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void do_recv(const char *name, int nonblock)</span>
+<span class="ln">{</span>
+<span class="ln">    mqd_t q = mq_open(name, O_RDONLY | (nonblock ? O_NONBLOCK : 0));</span>
+<span class="ln">    if (q == (mqd_t)-1) die(&quot;mq_open&quot;);</span>
+<span class="ln"> </span>
+<span class="ln">    struct mq_attr attr;</span>
+<span class="ln">    if (mq_getattr(q, &amp;attr) == -1) die(&quot;mq_getattr&quot;);</span>
+<span class="ln">    char *buf = malloc(attr.mq_msgsize + 1);    /* msgsize 이상이어야 한다 */</span>
+<span class="ln">    if (buf == NULL) die(&quot;malloc&quot;);</span>
+<span class="ln"> </span>
+<span class="ln">    /* 우선순위가 가장 높은 것 중 가장 오래된 메시지 하나. 비면 기다린다 */</span>
+<span class="ln">    unsigned prio;</span>
+<span class="ln">    ssize_t n = mq_receive(q, buf, attr.mq_msgsize, &amp;prio);</span>
+<span class="ln">    if (n == -1) die(&quot;mq_receive&quot;);</span>
+<span class="ln">    buf[n] = '\0';</span>
+<span class="ln">    printf(&quot;[%d] 받음: prio=%u len=%zd \&quot;%s\&quot;\n&quot;, (int)getpid(), prio, n, buf);</span>
+<span class="ln">    free(buf);</span>
+<span class="ln">    mq_close(q);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void do_stat(const char *name)</span>
+<span class="ln">{</span>
+<span class="ln">    mqd_t q = mq_open(name, O_RDONLY);</span>
+<span class="ln">    if (q == (mqd_t)-1) die(&quot;mq_open&quot;);</span>
+<span class="ln">    struct mq_attr attr;</span>
+<span class="ln">    if (mq_getattr(q, &amp;attr) == -1) die(&quot;mq_getattr&quot;);</span>
+<span class="ln">    printf(&quot;%s: maxmsg=%ld msgsize=%ld curmsgs=%ld\n&quot;, name, attr.mq_maxmsg,</span>
+<span class="ln">           attr.mq_msgsize, attr.mq_curmsgs);</span>
+<span class="ln">    mq_close(q);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    const char *cmd = argc &gt; 1 ? argv[1] : &quot;&quot;;</span>
+<span class="ln"> </span>
+<span class="ln">    if (!strcmp(cmd, &quot;create&quot;) &amp;&amp; (argc == 3 || argc == 5))</span>
+<span class="ln">        do_create(argv[2], argc == 5 ? atol(argv[3]) : 10,</span>
+<span class="ln">                  argc == 5 ? atol(argv[4]) : 128);</span>
+<span class="ln">    else if (!strcmp(cmd, &quot;send&quot;) &amp;&amp; argc == 5)</span>
+<span class="ln">        do_send(argv[2], (unsigned)atoi(argv[3]), argv[4]);</span>
+<span class="ln">    else if (!strcmp(cmd, &quot;recv&quot;) &amp;&amp; (argc == 3 || argc == 4))</span>
+<span class="ln">        do_recv(argv[2], argc == 4 &amp;&amp; !strcmp(argv[3], &quot;-n&quot;));</span>
+<span class="ln">    else if (!strcmp(cmd, &quot;stat&quot;) &amp;&amp; argc == 3)</span>
+<span class="ln">        do_stat(argv[2]);</span>
+<span class="ln">    else if (!strcmp(cmd, &quot;unlink&quot;) &amp;&amp; argc == 3) {</span>
+<span class="ln">        if (mq_unlink(argv[2]) == -1) die(&quot;mq_unlink&quot;);</span>
+<span class="ln">        printf(&quot;지움: %s\n&quot;, argv[2]);</span>
+<span class="ln">    } else {</span>
+<span class="ln">        fprintf(stderr, &quot;사용법: %s create|send|recv|stat|unlink /NAME ...\n&quot;,</span>
+<span class="ln">                argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="isolated.html">← isolated</a>
+    <a href="mqserver.html">mqserver →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

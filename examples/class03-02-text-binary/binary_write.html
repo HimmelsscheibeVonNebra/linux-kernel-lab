@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>binary_write — 텍스트와 바이너리 파일 입출력 실습 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class03-02-text-binary">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">3주차 2차시 · text-binary</a><span class="sep">/</span><span>binary_write</span></nav>
+  <header>
+    <h1>binary_write</h1>
+    <p>fopen(&quot;wb&quot;)으로 열어 int 배열 {10, 20, 30}을 fwrite로 헤더 없이 그대로 저장한다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class03-02-text-binary</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./binary_write numbers.bin; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./binary_write numbers.bin; echo &quot;exit=$?&quot;">▶</button><code>./binary_write numbers.bin; echo &quot;exit=$?&quot;</code></div>
+          <p>화면 출력 없이 파일만 만든다. 종료 상태 0.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="wc -c &lt; numbers.bin" title="터미널에서 실행" aria-label="실행: wc -c &lt; numbers.bin">▶</button><code>wc -c &lt; numbers.bin</code></div>
+          <p>3 * sizeof(int) = 12바이트다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="hexdump -C numbers.bin" title="터미널에서 실행" aria-label="실행: hexdump -C numbers.bin">▶</button><code>hexdump -C numbers.bin</code></div>
+          <p>0a 00 00 00 / 14 00 00 00 / 1e 00 00 00: 리틀 엔디언 4바이트 정수 세 개다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="cat numbers.bin; echo" title="터미널에서 실행" aria-label="실행: cat numbers.bin; echo">▶</button><code>cat numbers.bin; echo</code></div>
+          <p>텍스트로 해석하면 알아볼 수 없다. 같은 바이트라도 해석 방식이 다르다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./binary_write /dev/full; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./binary_write /dev/full; echo &quot;exit=$?&quot;">▶</button><code>./binary_write /dev/full; echo &quot;exit=$?&quot;</code></div>
+          <p>버퍼에 쌓인 데이터는 fclose 때 실제로 쓰이므로 fclose 오류로 실패(상태 1)가 보고된다.</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>binary_write.c <span class="muted">21줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* Same-environment native int format, exactly three values, no header. */</span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc != 2) {</span>
+<span class="ln">        fprintf(stderr, &quot;Usage: %s FILE\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    FILE *fp = fopen(argv[1], &quot;wb&quot;);</span>
+<span class="ln">    if (!fp) { perror(argv[1]); return 1; }</span>
+<span class="ln">    const int values[] = {10, 20, 30};</span>
+<span class="ln">    size_t n = fwrite(values, sizeof values[0], 3, fp);</span>
+<span class="ln">    int status = 0;</span>
+<span class="ln">    if (n != 3) {</span>
+<span class="ln">        fprintf(stderr, &quot;fwrite: wrote %zu of 3 items\n&quot;, n);</span>
+<span class="ln">        status = 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (fclose(fp) == EOF) { perror(&quot;fclose&quot;); status = 1; }</span>
+<span class="ln">    return status;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="file_seek.html">← file_seek</a>
+    <a href="binary_read.html">binary_read →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

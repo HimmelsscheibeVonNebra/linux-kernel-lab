@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sigmask_show — 시그널: 종료 상태·처리·관찰 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class09-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">9주차 1차시</a><span class="sep">/</span><span>sigmask_show</span></nav>
+  <header>
+    <h1>sigmask_show</h1>
+    <p>/proc/PID/status의 SigPnd·ShdPnd·SigBlk·SigIgn·SigCgt 비트마스크를 시그널 이름으로 풀어 보여 준다(인자가 없으면 자기 자신).</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class09-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./sigmask_show" title="터미널에서 실행" aria-label="실행: ./sigmask_show">▶</button><code>./sigmask_show</code></div>
+          <p>자기 자신: 아무 핸들러도 등록하지 않아 대부분 비어 있다</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./sigmask_show $$" title="터미널에서 실행" aria-label="실행: ./sigmask_show $$">▶</button><code>./sigmask_show $$</code></div>
+          <p>셸(ash)이 블록·무시·처리하는 시그널</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="sleep 5 &amp; ./sigmask_show $! | tail -2; kill $!; wait" title="터미널에서 실행" aria-label="실행: sleep 5 &amp; ./sigmask_show $! | tail -2; kill $!; wait">▶</button><code>sleep 5 &amp; ./sigmask_show $! | tail -2; kill $!; wait</code></div>
+          <p>백그라운드 sleep의 SigIgn·SigCgt</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="(trap '' INT; exec ./sigmask_show) | tail -2" title="터미널에서 실행" aria-label="실행: (trap '' INT; exec ./sigmask_show) | tail -2">▶</button><code>(trap '' INT; exec ./sigmask_show) | tail -2</code></div>
+          <p>무시(SIG_IGN) 설정은 exec를 넘어 상속된다: SigIgn에 INT</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./sigmask_show 1 2; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./sigmask_show 1 2; echo &quot;exit=$?&quot;">▶</button><code>./sigmask_show 1 2; echo &quot;exit=$?&quot;</code></div>
+          <p>인자가 많으면 usage, 종료 상태 2</p>
+        </li>
+      </ol>
+      <p class="callout">i386의 시그널 번호는 x86-64와 같아 이름 표가 그대로 맞는다. 셸이 bash가 아니라 BusyBox ash이므로 $$의 마스크는 교안과 다르다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>sigmask_show.c <span class="muted">59줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* /proc/PID/status의 Sig* 줄을 읽어 비트를 시그널 이름으로 푼다.</span>
+<span class="ln">   비트 n-1(오른쪽 끝이 비트 0)이 시그널 n이다. 인자가 없으면 self.</span>
+<span class="ln">   이름 표는 x86-64 리눅스 번호 기준이고, 32 이상은 RT(실시간)로 적는다. */</span>
+<span class="ln"> </span>
+<span class="ln">static const char *names[32] = {</span>
+<span class="ln">    &quot;?&quot;, &quot;HUP&quot;, &quot;INT&quot;, &quot;QUIT&quot;, &quot;ILL&quot;, &quot;TRAP&quot;, &quot;ABRT&quot;, &quot;BUS&quot;, &quot;FPE&quot;,</span>
+<span class="ln">    &quot;KILL&quot;, &quot;USR1&quot;, &quot;SEGV&quot;, &quot;USR2&quot;, &quot;PIPE&quot;, &quot;ALRM&quot;, &quot;TERM&quot;, &quot;STKFLT&quot;,</span>
+<span class="ln">    &quot;CHLD&quot;, &quot;CONT&quot;, &quot;STOP&quot;, &quot;TSTP&quot;, &quot;TTIN&quot;, &quot;TTOU&quot;, &quot;URG&quot;, &quot;XCPU&quot;,</span>
+<span class="ln">    &quot;XFSZ&quot;, &quot;VTALRM&quot;, &quot;PROF&quot;, &quot;WINCH&quot;, &quot;IO&quot;, &quot;PWR&quot;, &quot;SYS&quot;};</span>
+<span class="ln"> </span>
+<span class="ln">static void decode(const char *line)</span>
+<span class="ln">{</span>
+<span class="ln">    char label[16];</span>
+<span class="ln">    unsigned long long mask;</span>
+<span class="ln">    if (sscanf(line, &quot;%15[^:]: %llx&quot;, label, &amp;mask) != 2)</span>
+<span class="ln">        return;</span>
+<span class="ln">    printf(&quot;%-6s %016llx &quot;, label, mask);</span>
+<span class="ln">    if (mask == 0)</span>
+<span class="ln">        printf(&quot; -&quot;);</span>
+<span class="ln">    for (int sig = 1; sig &lt;= 64; sig++) {</span>
+<span class="ln">        if (!(mask &amp; (1ULL &lt;&lt; (sig - 1))))</span>
+<span class="ln">            continue;</span>
+<span class="ln">        if (sig &lt; 32)</span>
+<span class="ln">            printf(&quot; %s&quot;, names[sig]);</span>
+<span class="ln">        else</span>
+<span class="ln">            printf(&quot; RT%d&quot;, sig);</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;\n&quot;);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc &gt; 2) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s [pid]\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    char path[64];</span>
+<span class="ln">    snprintf(path, sizeof path, &quot;/proc/%s/status&quot;, argc == 2 ? argv[1] : &quot;self&quot;);</span>
+<span class="ln">    FILE *fp = fopen(path, &quot;r&quot;);</span>
+<span class="ln">    if (fp == NULL) {</span>
+<span class="ln">        perror(path);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    char line[256];</span>
+<span class="ln">    while (fgets(line, sizeof line, fp) != NULL) {</span>
+<span class="ln">        if (strncmp(line, &quot;Name:&quot;, 5) == 0 || strncmp(line, &quot;Pid:&quot;, 4) == 0)</span>
+<span class="ln">            fputs(line, stdout);</span>
+<span class="ln">        else if (strncmp(line, &quot;SigPnd:&quot;, 7) == 0 || strncmp(line, &quot;ShdPnd:&quot;, 7) == 0</span>
+<span class="ln">                 || strncmp(line, &quot;SigBlk:&quot;, 7) == 0 || strncmp(line, &quot;SigIgn:&quot;, 7) == 0</span>
+<span class="ln">                 || strncmp(line, &quot;SigCgt:&quot;, 7) == 0)</span>
+<span class="ln">            decode(line);</span>
+<span class="ln">    }</span>
+<span class="ln">    fclose(fp);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="timeout_read.html">← timeout_read</a>
+    <a href="sig_names.html">sig_names →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

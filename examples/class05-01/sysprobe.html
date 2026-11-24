@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sysprobe — 시스템 정보와 자원 한계 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class05-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">5주차 1차시</a><span class="sep">/</span><span>sysprobe</span></nav>
+  <header>
+    <h1>sysprobe</h1>
+    <p>uname(2)의 필드와 sysconf(3) 값(온라인 CPU 수, 페이지 크기, CLK_TCK, OPEN_MAX, ARG_MAX)을 출력합니다. sysconf의 -1 반환을 errno로 구분하는 계약을 보여 줍니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class05-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./sysprobe" title="터미널에서 실행" aria-label="실행: ./sysprobe">▶</button><code>./sysprobe</code></div>
+          <p>sysname, release, machine과 cpus_online, pagesize, clk_tck, open_max, arg_max 값을 확인합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="uname -a" title="터미널에서 실행" aria-label="실행: uname -a">▶</button><code>uname -a</code></div>
+          <p>sysprobe의 각 필드가 uname 명령의 어느 열과 대응하는지 맞춥니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="uname -r; uname -m" title="터미널에서 실행" aria-label="실행: uname -r; uname -m">▶</button><code>uname -r; uname -m</code></div>
+          <p>release와 machine 필드만 따로 비교합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="ulimit -Sn" title="터미널에서 실행" aria-label="실행: ulimit -Sn">▶</button><code>ulimit -Sn</code></div>
+          <p>open_max 값은 셸의 FD soft 한계와 같습니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="strace -e trace=uname ./sysprobe" title="터미널에서 실행" aria-label="실행: strace -e trace=uname ./sysprobe">▶</button><code>strace -e trace=uname ./sysprobe</code></div>
+          <p>uname 시스템 호출과 커널이 채워 준 구조체를 확인합니다.</p>
+        </li>
+      </ol>
+      <p class="callout">이 VM은 32비트 단일 CPU이므로 machine=i686, cpus_online=1이 나옵니다. getconf 명령은 없으므로 ulimit으로 교차 확인합니다. strace 출력에는 동적 로더가 호출한 uname이 함께 보일 수 있습니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>sysprobe.c <span class="muted">52줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;inttypes.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;sys/utsname.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* sysconf는 실패해도 errno를 바꾸지 않을 수 있으므로</span>
+<span class="ln">   호출 직전에 0으로 만들고 -1의 의미를 나누어 본다. */</span>
+<span class="ln">static int probe(const char *label, int name)</span>
+<span class="ln">{</span>
+<span class="ln">    errno = 0;</span>
+<span class="ln">    long value = sysconf(name);</span>
+<span class="ln">    if (value == -1) {</span>
+<span class="ln">        if (errno != 0) {</span>
+<span class="ln">            perror(label);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">        printf(&quot;%s=unlimited\n&quot;, label);</span>
+<span class="ln">        return 0;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;%s=%ld\n&quot;, label, value);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc != 1) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    struct utsname u;</span>
+<span class="ln">    if (uname(&amp;u) == -1) {</span>
+<span class="ln">        perror(&quot;uname&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;sysname=%s\n&quot;, u.sysname);</span>
+<span class="ln">    printf(&quot;nodename=%s\n&quot;, u.nodename);</span>
+<span class="ln">    printf(&quot;release=%s\n&quot;, u.release);</span>
+<span class="ln">    printf(&quot;version=%s\n&quot;, u.version);</span>
+<span class="ln">    printf(&quot;machine=%s\n&quot;, u.machine);</span>
+<span class="ln">    int status = 0;</span>
+<span class="ln">    status |= probe(&quot;cpus_online&quot;, _SC_NPROCESSORS_ONLN);</span>
+<span class="ln">    status |= probe(&quot;pagesize&quot;, _SC_PAGESIZE);</span>
+<span class="ln">    status |= probe(&quot;clk_tck&quot;, _SC_CLK_TCK);</span>
+<span class="ln">    status |= probe(&quot;open_max&quot;, _SC_OPEN_MAX);</span>
+<span class="ln">    status |= probe(&quot;arg_max&quot;, _SC_ARG_MAX);</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return status;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <span></span>
+    <a href="limit_show.html">limit_show →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

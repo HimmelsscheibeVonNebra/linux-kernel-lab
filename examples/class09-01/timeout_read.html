@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>timeout_read — 시그널: 종료 상태·처리·관찰 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class09-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">9주차 1차시</a><span class="sep">/</span><span>timeout_read</span></nav>
+  <header>
+    <h1>timeout_read</h1>
+    <p>alarm으로 read에 시간 제한을 걸고, 핸들러 없음(기본 동작 종료)·핸들러 있음(EINTR)·SA_RESTART(read 재시작) 세 경우를 비교한다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class09-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="(sleep 3; echo hello) | ./timeout_read default 1; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: (sleep 3; echo hello) | ./timeout_read default 1; echo &quot;exit=$?&quot;">▶</button><code>(sleep 3; echo hello) | ./timeout_read default 1; echo &quot;exit=$?&quot;</code></div>
+          <p>핸들러가 없으면 SIGALRM 기본 동작으로 종료: exit=142 (128+14)</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="(sleep 3; echo hello) | ./timeout_read norestart 1; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: (sleep 3; echo hello) | ./timeout_read norestart 1; echo &quot;exit=$?&quot;">▶</button><code>(sleep 3; echo hello) | ./timeout_read norestart 1; echo &quot;exit=$?&quot;</code></div>
+          <p>핸들러 실행 뒤 read가 -1 EINTR로 돌아온다(약 1초, exit=1)</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="(sleep 3; echo hello) | ./timeout_read restart 1; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: (sleep 3; echo hello) | ./timeout_read restart 1; echo &quot;exit=$?&quot;">▶</button><code>(sleep 3; echo hello) | ./timeout_read restart 1; echo &quot;exit=$?&quot;</code></div>
+          <p>SA_RESTART면 read가 다시 기다려 3초 뒤 6바이트를 읽는다(alarms=1)</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./timeout_read bogus 2; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./timeout_read bogus 2; echo &quot;exit=$?&quot;">▶</button><code>./timeout_read bogus 2; echo &quot;exit=$?&quot;</code></div>
+          <p>잘못된 모드는 usage, 종료 상태 2</p>
+        </li>
+      </ol>
+      <p class="callout">파이프 왼쪽의 sleep 3이 끝나야 줄이 끝나므로 각 단계는 약 3초 걸린다. 키보드 입력으로 해 보려면 ./timeout_read restart 5 를 실행하고 5초 뒤에 입력한다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>timeout_read.c <span class="muted">69줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;signal.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;time.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* alarm으로 read에 시간 제한을 건다.</span>
+<span class="ln">   default  : 핸들러가 없다. SIGALRM의 기본 동작(종료)이 일어난다.</span>
+<span class="ln">   norestart: SIGALRM을 잡는다. 핸들러가 끝나면 read가 -1, EINTR로 돌아온다.</span>
+<span class="ln">   restart  : SA_RESTART를 켠다. 핸들러가 끝나면 read가 다시 기다린다. */</span>
+<span class="ln"> </span>
+<span class="ln">static volatile sig_atomic_t alarms = 0;</span>
+<span class="ln"> </span>
+<span class="ln">static void on_alarm(int sig)</span>
+<span class="ln">{</span>
+<span class="ln">    static const char msg[] = &quot;  [handler] SIGALRM\n&quot;;</span>
+<span class="ln">    (void)sig;</span>
+<span class="ln">    ssize_t r = write(STDOUT_FILENO, msg, sizeof msg - 1);</span>
+<span class="ln">    (void)r;                    /* 핸들러 안에서는 printf 대신 write */</span>
+<span class="ln">    alarms++;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static double now(void)</span>
+<span class="ln">{</span>
+<span class="ln">    struct timespec ts;</span>
+<span class="ln">    clock_gettime(CLOCK_MONOTONIC, &amp;ts);</span>
+<span class="ln">    return ts.tv_sec + ts.tv_nsec / 1e9;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    long sec = argc == 3 ? strtol(argv[2], NULL, 10) : 0;</span>
+<span class="ln">    if (argc != 3 || sec &lt; 1 || sec &gt; 60 || (strcmp(argv[1], &quot;default&quot;) != 0</span>
+<span class="ln">        &amp;&amp; strcmp(argv[1], &quot;norestart&quot;) != 0 &amp;&amp; strcmp(argv[1], &quot;restart&quot;) != 0)) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s default|norestart|restart seconds(1-60)\n&quot;,</span>
+<span class="ln">                argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (strcmp(argv[1], &quot;default&quot;) != 0) {</span>
+<span class="ln">        struct sigaction sa;</span>
+<span class="ln">        memset(&amp;sa, 0, sizeof sa);</span>
+<span class="ln">        sa.sa_handler = on_alarm;</span>
+<span class="ln">        sigemptyset(&amp;sa.sa_mask);</span>
+<span class="ln">        sa.sa_flags = strcmp(argv[1], &quot;restart&quot;) == 0 ? SA_RESTART : 0;</span>
+<span class="ln">        if (sigaction(SIGALRM, &amp;sa, NULL) == -1) {</span>
+<span class="ln">            perror(&quot;sigaction&quot;);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;mode=%s alarm=%lds: waiting for input\n&quot;, argv[1], sec);</span>
+<span class="ln">    fflush(stdout);</span>
+<span class="ln"> </span>
+<span class="ln">    char buf[256];</span>
+<span class="ln">    double t0 = now();</span>
+<span class="ln">    alarm((unsigned)sec);</span>
+<span class="ln">    ssize_t n = read(STDIN_FILENO, buf, sizeof buf);</span>
+<span class="ln">    int saved = errno;</span>
+<span class="ln">    alarm(0);                   /* 남은 알람 취소 */</span>
+<span class="ln">    double t = now() - t0;</span>
+<span class="ln">    if (n == -1 &amp;&amp; saved == EINTR)</span>
+<span class="ln">        printf(&quot;read: -1 EINTR after %.2fs -&gt; timeout\n&quot;, t);</span>
+<span class="ln">    else if (n == -1)</span>
+<span class="ln">        printf(&quot;read: -1 %s\n&quot;, strerror(saved));</span>
+<span class="ln">    else</span>
+<span class="ln">        printf(&quot;read: %zd bytes after %.2fs (alarms=%d)\n&quot;, n, t, (int)alarms);</span>
+<span class="ln">    return n == -1;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="catch_int.html">← catch_int</a>
+    <a href="sigmask_show.html">sigmask_show →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

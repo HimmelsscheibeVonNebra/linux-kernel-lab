@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>countnl — 메모리 매핑 (mmap) · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class11-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">11주차 1차시</a><span class="sep">/</span><span>countnl</span></nav>
+  <header>
+    <h1>countnl</h1>
+    <p>같은 파일의 개행 수를 read(64 KiB 버퍼)와 mmap으로 세고, 경과 시간과 minor/major page fault 수(getrusage)를 출력합니다. drop은 posix_fadvise(DONTNEED)로 그 파일의 페이지 캐시를 비워 달라고 요청합니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class11-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="seq 1 1000000 &gt; lines.txt; ls -l lines.txt" title="터미널에서 실행" aria-label="실행: seq 1 1000000 &gt; lines.txt; ls -l lines.txt">▶</button><code>seq 1 1000000 &gt; lines.txt; ls -l lines.txt</code></div>
+          <p>100만 줄(약 6.9 MB)짜리 파일을 만든다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./countnl read lines.txt" title="터미널에서 실행" aria-label="실행: ./countnl read lines.txt">▶</button><code>./countnl read lines.txt</code></div>
+          <p>read 방식: lines=1000000, minflt는 거의 0이다 (커널이 버퍼로 복사해 준다).</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./countnl mmap lines.txt" title="터미널에서 실행" aria-label="실행: ./countnl mmap lines.txt">▶</button><code>./countnl mmap lines.txt</code></div>
+          <p>mmap 방식: 같은 줄 수가 나오지만 페이지를 처음 만질 때마다 fault가 나서 minflt가 read보다 훨씬 많다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./countnl mmap lines.txt seq" title="터미널에서 실행" aria-label="실행: ./countnl mmap lines.txt seq">▶</button><code>./countnl mmap lines.txt seq</code></div>
+          <p>madvise(MADV_SEQUENTIAL) 힌트를 준 경우의 시간과 fault 수를 비교한다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./countnl drop lines.txt; ./countnl read lines.txt" title="터미널에서 실행" aria-label="실행: ./countnl drop lines.txt; ./countnl read lines.txt">▶</button><code>./countnl drop lines.txt; ./countnl read lines.txt</code></div>
+          <p>drop 뒤 다시 읽는다. 이 VM에서는 majflt가 여전히 0이다 (notes 참고).</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="rm -f lines.txt" title="터미널에서 실행" aria-label="실행: rm -f lines.txt">▶</button><code>rm -f lines.txt</code></div>
+          <p>실습 파일을 지운다 (tmpfs라서 파일이 곧 메모리다).</p>
+        </li>
+      </ol>
+      <p class="callout">루트 파일시스템이 tmpfs(RAM)라서 파일 데이터가 곧 페이지 캐시입니다. posix_fadvise(DONTNEED)는 성공(0)을 돌려주지만 실제로 비워지지 않으므로 cold/warm 차이와 major fault는 관찰되지 않습니다. 또 RAM이 256 MB이므로 README의 247 MB 파일(seq 1 30000000) 실험은 할 수 없어 크기를 줄였습니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>countnl.c <span class="muted">108줄</span></summary>
+      <pre class="code"><code><span class="ln">/* countnl.c — 같은 파일의 개행 수를 read 방식과 mmap 방식으로 세고</span>
+<span class="ln"> *             경과 시간과 page fault 수를 함께 보여 준다.</span>
+<span class="ln"> * 사용법:</span>
+<span class="ln"> *   ./countnl read FILE</span>
+<span class="ln"> *   ./countnl mmap FILE [seq]    seq: madvise(MADV_SEQUENTIAL)</span>
+<span class="ln"> *   ./countnl drop FILE          이 파일의 페이지 캐시를 비운다 (cold 상태)</span>
+<span class="ln"> */</span>
+<span class="ln">#define _GNU_SOURCE</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;time.h&gt;</span>
+<span class="ln">#include &lt;sys/mman.h&gt;</span>
+<span class="ln">#include &lt;sys/stat.h&gt;</span>
+<span class="ln">#include &lt;sys/resource.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">#define BUFSZ (64 * 1024)</span>
+<span class="ln"> </span>
+<span class="ln">static void die(const char *msg) { perror(msg); exit(1); }</span>
+<span class="ln"> </span>
+<span class="ln">static long count_buf(const char *p, size_t n)</span>
+<span class="ln">{</span>
+<span class="ln">    long c = 0;</span>
+<span class="ln">    const char *end = p + n;</span>
+<span class="ln">    while ((p = memchr(p, '\n', (size_t)(end - p))) != NULL) {</span>
+<span class="ln">        c++;</span>
+<span class="ln">        p++;</span>
+<span class="ln">    }</span>
+<span class="ln">    return c;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static long count_read(int fd)</span>
+<span class="ln">{</span>
+<span class="ln">    static char buf[BUFSZ];</span>
+<span class="ln">    long c = 0;</span>
+<span class="ln">    ssize_t n;</span>
+<span class="ln">    while ((n = read(fd, buf, sizeof buf)) &gt; 0)</span>
+<span class="ln">        c += count_buf(buf, (size_t)n);</span>
+<span class="ln">    if (n &lt; 0) die(&quot;read&quot;);</span>
+<span class="ln">    return c;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static long count_mmap(int fd, size_t len, int advice)</span>
+<span class="ln">{</span>
+<span class="ln">    if (len == 0) return 0;</span>
+<span class="ln">    char *p = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0);</span>
+<span class="ln">    if (p == MAP_FAILED) die(&quot;mmap&quot;);</span>
+<span class="ln">    if (advice != MADV_NORMAL &amp;&amp; madvise(p, len, advice) &lt; 0) die(&quot;madvise&quot;);</span>
+<span class="ln">    long c = count_buf(p, len);</span>
+<span class="ln">    munmap(p, len);</span>
+<span class="ln">    return c;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static double now_ms(void)</span>
+<span class="ln">{</span>
+<span class="ln">    struct timespec ts;</span>
+<span class="ln">    clock_gettime(CLOCK_MONOTONIC, &amp;ts);</span>
+<span class="ln">    return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc &lt; 3) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s read|mmap|drop FILE [seq]\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    const char *mode = argv[1];</span>
+<span class="ln">    int fd = open(argv[2], O_RDONLY);</span>
+<span class="ln">    if (fd &lt; 0) die(argv[2]);</span>
+<span class="ln">    struct stat st;</span>
+<span class="ln">    if (fstat(fd, &amp;st) &lt; 0) die(&quot;fstat&quot;);</span>
+<span class="ln"> </span>
+<span class="ln">    if (strcmp(mode, &quot;drop&quot;) == 0) {</span>
+<span class="ln">#ifdef POSIX_FADV_DONTNEED</span>
+<span class="ln">        int e = posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);</span>
+<span class="ln">        if (e != 0) { fprintf(stderr, &quot;posix_fadvise: %s\n&quot;, strerror(e)); return 1; }</span>
+<span class="ln">        printf(&quot;dropped page cache of %s\n&quot;, argv[2]);</span>
+<span class="ln">        return 0;</span>
+<span class="ln">#else</span>
+<span class="ln">        fprintf(stderr, &quot;drop: posix_fadvise is not available on this OS\n&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">#endif</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    int seq = (argc == 4 &amp;&amp; strcmp(argv[3], &quot;seq&quot;) == 0);</span>
+<span class="ln">    int advice = seq ? MADV_SEQUENTIAL : MADV_NORMAL;</span>
+<span class="ln">    const char *tag = seq ? &quot;+seq&quot; : &quot;&quot;;</span>
+<span class="ln">    struct rusage r0, r1;</span>
+<span class="ln">    getrusage(RUSAGE_SELF, &amp;r0);</span>
+<span class="ln">    double t0 = now_ms();</span>
+<span class="ln"> </span>
+<span class="ln">    long lines;</span>
+<span class="ln">    if (strcmp(mode, &quot;read&quot;) == 0)</span>
+<span class="ln">        lines = count_read(fd);</span>
+<span class="ln">    else if (strcmp(mode, &quot;mmap&quot;) == 0)</span>
+<span class="ln">        lines = count_mmap(fd, (size_t)st.st_size, advice);</span>
+<span class="ln">    else { fprintf(stderr, &quot;unknown mode %s\n&quot;, mode); return 2; }</span>
+<span class="ln"> </span>
+<span class="ln">    double t1 = now_ms();</span>
+<span class="ln">    getrusage(RUSAGE_SELF, &amp;r1);</span>
+<span class="ln">    printf(&quot;%-4s%-4s lines=%ld  %8.1f ms  minflt=%ld  majflt=%ld\n&quot;,</span>
+<span class="ln">           mode, tag, lines, t1 - t0,</span>
+<span class="ln">           r1.ru_minflt - r0.ru_minflt, r1.ru_majflt - r0.ru_majflt);</span>
+<span class="ln">    close(fd);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="mapmode.html">← mapmode</a>
+    <span></span>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

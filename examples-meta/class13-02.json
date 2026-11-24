@@ -1,0 +1,104 @@
+{
+  "class": "class13-02",
+  "title": "공유 메모리 · 세마포어 · 스레드 동기화",
+  "summary": "POSIX 공유 메모리(shm_open · mmap)와 그 위의 경쟁 상태, 세마포어로 만드는 잠금과 생산자–소비자, 스레드의 뮤텍스 · 조건 변수 · 계수 세마포어를 다루는 예제입니다.",
+  "examples": [
+    {
+      "name": "shmhello",
+      "source": "shmhello.c",
+      "summary": "shm_open · ftruncate · mmap(MAP_SHARED)으로 이름 있는 공유 메모리 /w13_hello 에 글을 써 두고, 서로 무관한 다른 프로세스가 같은 이름으로 붙여 읽습니다.",
+      "steps": [
+        { "cmd": "./shmhello write \"hello shm\"", "note": "공유 메모리를 만들고 글을 써 둔 뒤 프로세스가 끝난다." },
+        { "cmd": "./shmhello read", "note": "다른 프로세스(PID가 다르다)가 같은 이름으로 붙여 \"hello shm\"을 읽는다." },
+        { "cmd": "ls -l /dev/shm/w13_hello; od -c /dev/shm/w13_hello | head -2", "note": "공유 메모리 객체는 /dev/shm 아래의 4096바이트 파일로 보이고, 내용도 파일로 읽을 수 있다." },
+        { "cmd": "./shmhello rm; ./shmhello read; echo \"exit=$?\"", "note": "shm_unlink로 이름을 지우면 다시 열 수 없다 (No such file or directory, exit=1)." }
+      ],
+      "manual": false,
+      "expect": "읽음: \"hello shm\""
+    },
+    {
+      "name": "shmrace",
+      "source": "shmrace.c",
+      "summary": "공유 메모리 /w13_counter 의 count를 여러 프로세스가 잠금 없이 올려, 갱신이 사라지는 경쟁 상태를 관찰합니다.",
+      "steps": [
+        { "cmd": "./shmrace rm 2>/dev/null; ./shmrace init", "note": "공유 메모리를 만들고 count = 0으로 시작한다 (세마포어도 함께 초기화한다)." },
+        { "cmd": "./shmrace add 1000000; ./shmrace show", "note": "프로세스 하나만 올리면 정확히 count = 1000000 이다." },
+        { "cmd": "for i in 1 2 3 4; do ./shmrace add 5000000 & done; wait", "note": "프로세스 4개가 잠금 없이 500만 번씩 동시에 올린다." },
+        { "cmd": "./shmrace show", "note": "잃은 것이 없다면 21000000 이어야 한다. 그보다 작으면 그만큼 갱신이 사라진 것이다." },
+        { "cmd": "./shmrace rm", "note": "공유 메모리의 이름을 지운다." }
+      ],
+      "manual": false,
+      "expect": "count = 1000000",
+      "notes": "이 VM은 CPU가 1개라서 경쟁은 프로세스가 '읽고 · 더하고 · 쓰는' 중간에 타이머 인터럽트로 교체될 때만 생깁니다. 그래서 반복 횟수를 크게(500만) 잡았지만 그래도 21000000이 그대로 나올 수 있습니다. 셋째·넷째 단계를 몇 번 반복해 보세요 (합계는 그만큼씩 늘어납니다). 32비트라 struct shared는 20바이트입니다."
+    },
+    {
+      "name": "semcount",
+      "source": "semcount.c",
+      "summary": "shmrace와 같은 공유 카운터를 프로세스 간 세마포어(sem_wait · sem_post)로 잠그고 올립니다. hold · try · value로 잠금이 쥐어진 상태, sem_timedwait의 시간 제한, 잠근 채 죽은 프로세스의 문제를 확인합니다.",
+      "steps": [
+        { "cmd": "./shmrace rm 2>/dev/null; ./shmrace init", "note": "공유 메모리와 세마포어(처음 값 1)를 shmrace init으로 만든다. semcount는 이것이 있어야 동작한다." },
+        { "cmd": "for i in 1 2 3 4; do ./semcount add 200000 & done; wait; ./shmrace show", "note": "프로세스 4개가 세마포어로 잠그고 올리면 항상 정확히 count = 800000 이다." },
+        { "cmd": "./semcount value", "note": "아무도 쥐고 있지 않으면 세마포어 값 = 1 (열림)." },
+        { "cmd": "./semcount hold 2 & sleep 1; ./semcount value; ./semcount try; wait", "note": "hold가 쥔 동안 값은 0(잠김)이다. try는 기다리다가 hold가 2초 뒤 풀어 주면 잠그고 한 번 올린다 (count = 800001)." },
+        { "cmd": "./semcount hold 8 & sleep 1; ./semcount try; kill $!; sleep 1; ./semcount value", "note": "이번에는 2초 안에 풀리지 않아 try가 Connection timed out으로 포기한다. 쥐고 있던 프로세스를 kill로 죽여도 세마포어는 0(잠김)으로 남는다." },
+        { "cmd": "./shmrace rm", "note": "잠긴 채 남은 공유 메모리를 지운다 (다시 쓰려면 shmrace init부터)." }
+      ],
+      "manual": false,
+      "expect": "count = 800000",
+      "notes": "CPU가 1개여도 세마포어를 쓰면 결과는 항상 정확합니다. 다섯째 단계처럼 잠근 프로세스가 죽으면 세마포어는 자동으로 풀리지 않습니다."
+    },
+    {
+      "name": "ringbuf",
+      "source": "ringbuf.c",
+      "summary": "공유 메모리에 놓은 8칸 원형 버퍼와 세마포어 셋(slots · items · mutex)으로 프로세스 사이의 생산자–소비자를 만듭니다. 가득 차면 생산자가, 비면 소비자가 잠듭니다.",
+      "steps": [
+        { "cmd": "./ringbuf rm 2>/dev/null; ./ringbuf init; ./ringbuf stat", "note": "버퍼와 세마포어를 만든다. 처음에는 빈 칸 8 · 든 칸 0." },
+        { "cmd": "./ringbuf put 1 12 & sleep 1; ./ringbuf stat", "note": "생산자가 1~8을 넣고 9번째에서 빈 칸이 없어 잠든다. stat은 빈 칸 0 · 든 칸 8." },
+        { "cmd": "./ringbuf get 12; wait", "note": "소비자가 꺼내기 시작하면 생산자가 깨어나 나머지(9~12)를 넣는다. 1~12가 순서대로 나오고 합 = 78." },
+        { "cmd": "./ringbuf get 3 & sleep 1; ./ringbuf put 7 3; wait", "note": "반대로 빈 버퍼에서는 소비자가 잠든다. 7, 8, 9가 들어오자 깨어나 합 = 24를 출력한다." },
+        { "cmd": "./ringbuf stat; ./ringbuf rm", "note": "모두 꺼냈으므로 다시 빈 칸 8 · 든 칸 0. 마지막에 이름을 지운다." }
+      ],
+      "manual": false,
+      "expect": "12개의 합 = 78",
+      "notes": "32비트라 struct ring은 88바이트로 출력됩니다 (64비트에서는 더 큽니다)."
+    },
+    {
+      "name": "thcount",
+      "source": "thcount.c",
+      "summary": "스레드 여럿이 전역 변수 하나를 올립니다. 잠금 없이(none), 뮤텍스로(mutex), 세마포어로(sem) 올린 결과를 기대값과 비교합니다.",
+      "steps": [
+        { "cmd": "./thcount none 4 5000000", "note": "잠금 없이 스레드 4개 × 500만 번. count가 기대값 20000000보다 작으면 갱신이 사라진 것이다." },
+        { "cmd": "./thcount mutex 4 500000", "note": "pthread_mutex로 잠그면 항상 정확히 count = 2000000 (기대 2000000)." },
+        { "cmd": "./thcount sem 4 500000", "note": "처음 값 1인 세마포어(sem_wait · sem_post)로 잠가도 결과는 정확하다." }
+      ],
+      "manual": false,
+      "expect": "count = 2000000 (기대 2000000)",
+      "notes": "이 VM은 CPU가 1개라서 none 모드의 경쟁은 스레드가 count++ 중간에 타이머 인터럽트로 교체될 때만 생깁니다. 반복 횟수를 500만으로 키웠지만 그래도 기대값이 그대로 나올 수 있으니 몇 번 반복해 보세요. mutex · sem은 VM 속도를 고려해 50만 번으로 줄였습니다."
+    },
+    {
+      "name": "thqueue",
+      "source": "thqueue.c",
+      "summary": "뮤텍스 하나와 조건 변수 둘(not_full · not_empty)로 8칸 버퍼의 생산자–소비자를 스레드로 만듭니다. pthread_cond_wait를 while로 감싸는 이유와 종료 알림(broadcast)을 보여 줍니다.",
+      "steps": [
+        { "cmd": "./thqueue 2 1 5", "note": "생산자 2개가 5개씩(100~104, 200~204) 넣고 소비자 1개가 꺼낸다. 항목이 적어 넣고 꺼내는 과정이 모두 출력되며 합 = 1520 (기대 1520)." },
+        { "cmd": "./thqueue 4 2 20000", "note": "생산자 4개 × 2만 개를 소비자 2개가 나눠 꺼낸다. 합이 기대값과 같으면 하나도 잃거나 두 번 꺼내지 않은 것이다." },
+        { "cmd": "./thqueue 1 1 30 5", "note": "소비자가 하나 꺼낼 때마다 5 ms 쉰다. 버퍼가 가득 차 생산자가 기다린 횟수('가득 차서 기다림')가 0보다 크다." }
+      ],
+      "manual": false,
+      "expect": "꺼낸 값의 합 = 1520 (기대 1520)",
+      "notes": "32비트에서는 long이 4바이트라서 교안의 ./thqueue 4 2 50000 은 합(약 50억)이 long 범위를 넘어 이상한 값으로 출력됩니다. 그래서 N을 20000으로 줄였습니다 (합 819960000)."
+    },
+    {
+      "name": "thlimit",
+      "source": "thlimit.c",
+      "summary": "계수 세마포어(처음 값 K)로 한 번에 K개 스레드만 임계 구역에 들어가게 합니다. 안에 있는 수와 최댓값은 뮤텍스로 지킵니다.",
+      "steps": [
+        { "cmd": "./thlimit 6 2", "note": "스레드 6개 중 한 번에 2개만 들어간다. '안에 3개'는 나오지 않고 마지막 줄은 '가장 많을 때 안에 2개 (한도 2)'." },
+        { "cmd": "./thlimit 6 1", "note": "K = 1이면 이진 세마포어(잠금)와 같다. 들어감과 나옴이 번갈아 나온다." },
+        { "cmd": "time ./thlimit 6 6", "note": "K를 스레드 수만큼 주면 모두 한꺼번에 들어가 전체가 약 0.1초에 끝난다." }
+      ],
+      "manual": false,
+      "expect": "가장 많을 때 안에 2개 (한도 2)"
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>arg_show — 프로세스 정체성·인자·환경 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class06-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">6주차 1차시</a><span class="sep">/</span><span>arg_show</span></nav>
+  <header>
+    <h1>arg_show</h1>
+    <p>argc와 argv 배열을 출력하고 argv[argc]가 NULL임을 보여 줍니다. argv[0]은 호출 쪽이 정하는 값이라 프로그램 판별에 쓸 수 없음을 확인합니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class06-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./arg_show one two three" title="터미널에서 실행" aria-label="실행: ./arg_show one two three">▶</button><code>./arg_show one two three</code></div>
+          <p>argc=4, argv[0]~argv[3], 그리고 argv[4]=(nil)을 확인합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./arg_show 'a b' '' '*.c' *.c | head -8" title="터미널에서 실행" aria-label="실행: ./arg_show 'a b' '' '*.c' *.c | head -8">▶</button><code>./arg_show 'a b' '' '*.c' *.c | head -8</code></div>
+          <p>따옴표는 셸이 처리합니다. 빈 문자열도 인자 하나이고, 따옴표 없는 *.c는 셸이 파일 이름들로 펼칩니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="(exec -a fake-name ./arg_show x)" title="터미널에서 실행" aria-label="실행: (exec -a fake-name ./arg_show x)">▶</button><code>(exec -a fake-name ./arg_show x)</code></div>
+          <p>exec -a로 argv[0]만 fake-name으로 바뀝니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="ln -sf arg_show other_name &amp;&amp; ./other_name x; rm -f other_name" title="터미널에서 실행" aria-label="실행: ln -sf arg_show other_name &amp;&amp; ./other_name x; rm -f other_name">▶</button><code>ln -sf arg_show other_name &amp;&amp; ./other_name x; rm -f other_name</code></div>
+          <p>같은 실행 파일도 다른 이름으로 부르면 argv[0]이 달라집니다.</p>
+        </li>
+      </ol>
+      <p class="callout">README의 bash -c 'exec -a ...'는 bash가 없어 ash 서브셸로 대체했습니다. BusyBox ash 버전에 따라 exec -a를 지원하지 않으면 그 단계만 오류가 나며, 심볼릭 링크 단계로 같은 개념을 확인할 수 있습니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>arg_show.c <span class="muted">21줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* argv는 널 종료 문자열의 포인터 배열이다.</span>
+<span class="ln">   argv[argc]는 NULL이 보장되므로 개수와 널 두 가지로</span>
+<span class="ln">   끝을 확인할 수 있다. argv[0]은 관례상 프로그램 이름이지만</span>
+<span class="ln">   호출 쪽이 무엇이든 넣을 수 있으므로 보증으로 쓰지 않는다. */</span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    printf(&quot;argc=%d\n&quot;, argc);</span>
+<span class="ln">    for (int i = 0; i &lt; argc; i++) {</span>
+<span class="ln">        printf(&quot;argv[%d]=%s\n&quot;, i, argv[i]);</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;argv[%d]=%p\n&quot;, argc, (void *)argv[argc]);</span>
+<span class="ln">    /* exec -a 등으로 argv[0]을 바꾼 실행과 비교할 때</span>
+<span class="ln">       문자열 길이도 함께 출력하면 길이 검증의 출발점이 된다. */</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="id_probe.html">← id_probe</a>
+    <a href="env_dump.html">env_dump →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

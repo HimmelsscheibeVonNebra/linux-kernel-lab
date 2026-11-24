@@ -1,0 +1,81 @@
+{
+  "class": "class04-02",
+  "title": "파일 속성",
+  "summary": "stat/lstat으로 파일 속성을 조회하고 권한(umask·fchmod), 희소 파일의 크기와 할당량, 시간 속성(futimens), unlink 이후의 열린 FD를 관찰하는 예제입니다.",
+  "examples": [
+    {
+      "name": "file_attr",
+      "source": "file_attr.c",
+      "summary": "기본은 lstat, --follow를 주면 stat으로 종류, inode, 링크 수, 권한(rwx 문자열), 소유자, 크기·블록 수, 나노초 단위 atime/mtime/ctime을 출력합니다.",
+      "steps": [
+        { "cmd": "rm -rf attr_lab && mkdir attr_lab && printf 'ABC\\n' > attr_lab/note.txt && ln attr_lab/note.txt attr_lab/hard.txt && ln -s note.txt attr_lab/soft.txt", "note": "4바이트 파일과 하드 링크, 심볼릭 링크를 준비합니다." },
+        { "cmd": "./file_attr attr_lab/note.txt", "note": "type=regular, links=2, size=4와 rwx 문자열, 세 가지 시각을 확인합니다." },
+        { "cmd": "./file_attr attr_lab/soft.txt", "note": "lstat 결과입니다. type=symlink, size는 'note.txt'의 길이 8입니다." },
+        { "cmd": "./file_attr --follow attr_lab/soft.txt", "note": "stat은 링크를 따라가므로 대상의 type=regular, size=4와 같은 inode가 나옵니다." },
+        { "cmd": "ln -s missing attr_lab/broken.txt && ./file_attr attr_lab/broken.txt && ./file_attr --follow attr_lab/broken.txt; echo \"status=$?\"", "note": "깨진 링크도 링크 자체의 속성은 읽히지만 --follow 조회는 ENOENT로 실패합니다(상태 1)." },
+        { "cmd": "chmod 000 attr_lab/note.txt; ./file_attr attr_lab/note.txt; cat attr_lab/note.txt; chmod 600 attr_lab/note.txt", "note": "권한이 0000이어도 속성 조회는 됩니다. 내용 읽기(cat)만 Permission denied로 실패합니다." }
+      ],
+      "manual": false,
+      "expect": "type=symlink",
+      "notes": "root가 아닌 student(uid 1000)로 실행하므로 mode 000 파일의 cat이 실제로 거부됩니다. _FILE_OFFSET_BITS=64로 빌드되어 크기는 64비트이지만 time_t는 32비트입니다. tmpfs라 blocks 값은 디스크 파일시스템과 다를 수 있습니다."
+    },
+    {
+      "name": "mode_demo",
+      "source": "mode_demo.c",
+      "summary": "umask를 바꿔 가며 openat(O_CREAT|O_EXCL)·mkdirat으로 파일과 디렉토리를 만들고, fchmod 전후의 권한을 fstat으로 확인합니다.",
+      "steps": [
+        { "cmd": "rm -rf modes && mkdir modes", "note": "빈 실습 디렉토리를 준비합니다." },
+        { "cmd": "./mode_demo modes", "note": "0666&~022=0644, fchmod 후 0640, 0666&~077=0600, 디렉토리 0777&~027=0750 순으로 출력됩니다." },
+        { "cmd": "ls -l modes", "note": "mask022.txt는 fchmod 이후 값인 rw-r-----, groupdir는 rwxr-x---입니다." },
+        { "cmd": "./mode_demo modes; echo \"status=$?\"", "note": "O_EXCL 때문에 두 번째 실행은 'File exists'로 실패합니다(상태 1). 기존 파일은 덮어쓰지 않습니다." }
+      ],
+      "manual": false,
+      "expect": "groupdir mode=0750"
+    },
+    {
+      "name": "sparse_demo",
+      "source": "sparse_demo.c",
+      "summary": "새 파일에서 lseek로 1MiB 위치로 이동한 뒤 1바이트를 써서 희소 파일을 만들고, 논리적 크기(st_size)와 할당 블록 수(st_blocks)를 비교합니다.",
+      "steps": [
+        { "cmd": "rm -f sparse.bin", "note": "O_EXCL로 새로 만들므로 기존 파일을 먼저 지웁니다." },
+        { "cmd": "./sparse_demo sparse.bin", "note": "size=1048577인데 blocks(512바이트 단위)는 그보다 훨씬 작습니다." },
+        { "cmd": "ls -l sparse.bin", "note": "ls가 보여 주는 크기는 논리적 크기 1048577바이트입니다." },
+        { "cmd": "stat -c 'size=%s blocks=%b unit=%B' sparse.bin", "note": "stat 명령으로 같은 값을 교차 확인합니다." },
+        { "cmd": "hexdump -C sparse.bin | head -5", "note": "앞부분은 모두 00(구멍)이고 오프셋 0x100000에 'X'(58) 한 바이트가 있습니다." },
+        { "cmd": "./sparse_demo sparse.bin; echo \"status=$?\"", "note": "이미 있는 경로는 O_EXCL로 실패합니다(상태 1)." }
+      ],
+      "manual": false,
+      "expect": "size=1048577",
+      "notes": "_FILE_OFFSET_BITS=64로 빌드되어 32비트에서도 off_t가 64비트입니다. tmpfs는 실제로 쓴 페이지만 할당하므로 blocks는 보통 8(4KiB 한 페이지)이지만 파일시스템마다 다릅니다."
+    },
+    {
+      "name": "time_attrs",
+      "source": "time_attrs.c",
+      "summary": "futimens(2)로 atime·mtime을 지정한 값(2024-01-01, 2024-01-02 UTC)으로 바꾸고, fchmod 뒤에도 그 값이 유지되며 ctime만 현재 시각임을 보여 줍니다.",
+      "steps": [
+        { "cmd": "rm -f times.txt", "note": "O_EXCL로 새로 만들므로 기존 파일을 먼저 지웁니다." },
+        { "cmd": "./time_attrs times.txt", "note": "두 줄 모두 atime=1704067200 mtime=1704153600이고 mode만 0600에서 0640으로 바뀝니다." },
+        { "cmd": "stat -c 'atime=%X mtime=%Y ctime=%Z' times.txt", "note": "ctime은 지정할 수 없으며 방금 변경한 현재 시각입니다." },
+        { "cmd": "date -d @1704153600", "note": "mtime 값을 달력 시각으로 바꿔 봅니다(KST 2024-01-02 09:00)." },
+        { "cmd": "ls -l times.txt", "note": "ls가 보여 주는 날짜는 mtime(2024년 1월 2일)입니다." },
+        { "cmd": "./time_attrs times.txt; echo \"status=$?\"", "note": "이미 있는 경로는 'File exists'로 실패합니다(상태 1)." }
+      ],
+      "manual": false,
+      "expect": "atime=1704067200 mtime=1704153600",
+      "notes": "time_t가 32비트이지만 지정한 시각은 2038년 이전이라 문제없습니다."
+    },
+    {
+      "name": "fd_unlink_demo",
+      "source": "fd_unlink_demo.c",
+      "summary": "mkstemp로 만든 임시 파일을 unlink한 뒤에도 열린 FD로 fstat(links=0)과 read가 가능함을 보여 줍니다. 이름과 inode의 수명이 다르다는 예제입니다.",
+      "steps": [
+        { "cmd": "./fd_unlink_demo", "note": "before links=1 → after links=0, inode와 size=5는 그대로이고 path_lookup=ENOENT 뒤에도 read=hello가 나옵니다." },
+        { "cmd": "ls /tmp | grep -c lsp-file-attrs", "note": "0이 출력됩니다. 종료 후 임시 파일 이름은 남지 않습니다." },
+        { "cmd": "strace -e trace=unlink ./fd_unlink_demo", "note": "unlink 시스템 호출이 'after' 줄보다 먼저 일어나는 것을 확인합니다." }
+      ],
+      "manual": false,
+      "expect": "path_lookup=ENOENT",
+      "notes": "인자를 받지 않습니다(인자를 주면 상태 2). 임시 파일은 tmpfs인 /tmp에 만들어집니다."
+    }
+  ]
+}

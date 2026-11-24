@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>addr_show — 프로세스 기본: 주소 공간·상태·자원 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class07-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">7주차 1차시</a><span class="sep">/</span><span>addr_show</span></nav>
+  <header>
+    <h1>addr_show</h1>
+    <p>전역(data·bss)·정적·지역(stack)·malloc(heap) 변수의 가상 주소를 출력하고, 지정한 초 동안 살아 있어 /proc/PID/maps와 대조할 수 있게 한다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class07-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./addr_show" title="터미널에서 실행" aria-label="실행: ./addr_show">▶</button><code>./addr_show</code></div>
+          <p>data·bss·stack·heap 주소가 서로 다른 구역에 있음을 확인</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./addr_show | grep heap; ./addr_show | grep heap" title="터미널에서 실행" aria-label="실행: ./addr_show | grep heap; ./addr_show | grep heap">▶</button><code>./addr_show | grep heap; ./addr_show | grep heap</code></div>
+          <p>실행할 때마다 주소 값이 달라지는지(ASLR) 비교</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./addr_show 3 &amp; sleep 1; grep -E 'addr_show|heap|stack' /proc/$!/maps; wait" title="터미널에서 실행" aria-label="실행: ./addr_show 3 &amp; sleep 1; grep -E 'addr_show|heap|stack' /proc/$!/maps; wait">▶</button><code>./addr_show 3 &amp; sleep 1; grep -E 'addr_show|heap|stack' /proc/$!/maps; wait</code></div>
+          <p>출력된 주소가 maps의 어느 행(실행 파일·[heap]·[stack])에 속하는지 대조</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./addr_show extra; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./addr_show extra; echo &quot;exit=$?&quot;">▶</button><code>./addr_show extra; echo &quot;exit=$?&quot;</code></div>
+          <p>잘못된 인자는 usage와 종료 상태 2</p>
+        </li>
+      </ol>
+      <p class="callout">32비트(i686) 게스트라 주소가 8자리 16진수이고 스택은 3GB 경계 아래(0xbf…/0xff… 부근)에 나타난다. 교안의 x86-64 주소 값과는 다르다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>addr_show.c <span class="muted">59줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* Linux의 일반적인 C 실행 환경에서 변수의 가상 주소를 관찰한다.</span>
+<span class="ln">   [seconds] 동안 살아 있게 하여 같은 PID의 maps와 대조한다.</span>
+<span class="ln">   함수 주소의 void * 변환이나 별개 객체의 포인터 대소 비교는</span>
+<span class="ln">   하지 않는다. 코드 영역은 maps의 실행 권한(x)으로 찾는다. */</span>
+<span class="ln">int global_init = 7;</span>
+<span class="ln">int global_zero;</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    long seconds = 0;</span>
+<span class="ln">    if (argc &gt; 2) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s [seconds 0-600]\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (argc == 2) {</span>
+<span class="ln">        char *end = NULL;</span>
+<span class="ln">        seconds = strtol(argv[1], &amp;end, 10);</span>
+<span class="ln">        if (end == argv[1] || *end != '\0' ||</span>
+<span class="ln">            seconds &lt; 0 || seconds &gt; 600) {</span>
+<span class="ln">            fprintf(stderr, &quot;usage: %s [seconds 0-600]\n&quot;, argv[0]);</span>
+<span class="ln">            return 2;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    int local = 3;</span>
+<span class="ln">    static int local_static = 9;</span>
+<span class="ln">    char *heap1 = malloc(64);</span>
+<span class="ln">    char *heap2 = malloc(64);</span>
+<span class="ln">    if (heap1 == NULL || heap2 == NULL) {</span>
+<span class="ln">        perror(&quot;malloc&quot;);</span>
+<span class="ln">        free(heap1);</span>
+<span class="ln">        free(heap2);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;pid=%ld\n&quot;, (long)getpid());</span>
+<span class="ln">    printf(&quot;data=%p bss=%p\n&quot;,</span>
+<span class="ln">           (void *)&amp;global_init, (void *)&amp;global_zero);</span>
+<span class="ln">    printf(&quot;data_static=%p stack=%p\n&quot;,</span>
+<span class="ln">           (void *)&amp;local_static, (void *)&amp;local);</span>
+<span class="ln">    printf(&quot;pointer_on_stack=%p\n&quot;, (void *)&amp;heap1);</span>
+<span class="ln">    printf(&quot;heap1=%p heap2=%p\n&quot;, (void *)heap1, (void *)heap2);</span>
+<span class="ln">    printf(&quot;observe: cat /proc/%ld/maps\n&quot;, (long)getpid());</span>
+<span class="ln">    printf(&quot;hold_seconds=%ld\n&quot;, seconds);</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        free(heap1);</span>
+<span class="ln">        free(heap2);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    unsigned int remaining = (unsigned int)seconds;</span>
+<span class="ln">    while (remaining != 0)</span>
+<span class="ln">        remaining = sleep(remaining);</span>
+<span class="ln">    free(heap1);</span>
+<span class="ln">    free(heap2);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <span></span>
+    <a href="maps_show.html">maps_show →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

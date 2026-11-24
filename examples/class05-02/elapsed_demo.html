@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>elapsed_demo — 시간과 시계 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class05-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">5주차 2차시</a><span class="sep">/</span><span>elapsed_demo</span></nav>
+  <header>
+    <h1>elapsed_demo</h1>
+    <p>CLOCK_MONOTONIC을 나노초 정수로 바꿔 같은 작업을 다섯 번 측정하고 min·median·max를 출력합니다. --clocks는 시계별 현재 값과 해상도(clock_getres)를 보여 줍니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class05-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./elapsed_demo" title="터미널에서 실행" aria-label="실행: ./elapsed_demo">▶</button><code>./elapsed_demo</code></div>
+          <p>run1~run5 값이 매번 달라도 min &lt;= median &lt;= max 관계는 유지됩니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./elapsed_demo" title="터미널에서 실행" aria-label="실행: ./elapsed_demo">▶</button><code>./elapsed_demo</code></div>
+          <p>다시 실행해 측정값의 흔들림을 비교합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./elapsed_demo --clocks" title="터미널에서 실행" aria-label="실행: ./elapsed_demo --clocks">▶</button><code>./elapsed_demo --clocks</code></div>
+          <p>CLOCK_REALTIME의 now는 에포크 초, CLOCK_MONOTONIC의 now는 부팅 후 초입니다. res는 해상도입니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="date +%s; cat /proc/uptime" title="터미널에서 실행" aria-label="실행: date +%s; cat /proc/uptime">▶</button><code>date +%s; cat /proc/uptime</code></div>
+          <p>두 시계의 now 값을 각각 date +%s, /proc/uptime과 비교합니다.</p>
+        </li>
+      </ol>
+      <p class="callout">단일 CPU의 브라우저 VM에서는 측정값이 실제 PC보다 훨씬 크고 편차도 큽니다. 한 번 실행에 수 초가 걸릴 수 있습니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>elapsed_demo.c <span class="muted">104줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;time.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* timespec을 나노초 정수로 바꾸고 빼기를 정수로 처리한다. */</span>
+<span class="ln">static long long ts_ns(const struct timespec *ts)</span>
+<span class="ln">{</span>
+<span class="ln">    return (long long)ts-&gt;tv_sec * 1000000000LL + ts-&gt;tv_nsec;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static long long now_ns(clockid_t clock)</span>
+<span class="ln">{</span>
+<span class="ln">    struct timespec ts;</span>
+<span class="ln">    if (clock_gettime(clock, &amp;ts) == -1) {</span>
+<span class="ln">        perror(&quot;clock_gettime&quot;);</span>
+<span class="ln">        exit(1);</span>
+<span class="ln">    }</span>
+<span class="ln">    return ts_ns(&amp;ts);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int cmp_ll(const void *a, const void *b)</span>
+<span class="ln">{</span>
+<span class="ln">    long long x = *(const long long *)a, y = *(const long long *)b;</span>
+<span class="ln">    return x &lt; y ? -1 : x &gt; y;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* 재지정 불가 작업량: volatile 배열을 여러 번 훑는다. */</span>
+<span class="ln">static long long workload(void)</span>
+<span class="ln">{</span>
+<span class="ln">    static volatile int a[1000000];</span>
+<span class="ln">    long long sum = 0;</span>
+<span class="ln">    for (int pass = 0; pass &lt; 4; ++pass)</span>
+<span class="ln">        for (int i = 0; i &lt; 1000000; ++i)</span>
+<span class="ln">            sum += a[i] + i;</span>
+<span class="ln">    return sum;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void spin_ns(long long ns)</span>
+<span class="ln">{</span>
+<span class="ln">    long long start = now_ns(CLOCK_MONOTONIC);</span>
+<span class="ln">    while (now_ns(CLOCK_MONOTONIC) - start &lt; ns)</span>
+<span class="ln">        ;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void show_clock(const char *name, clockid_t clock)</span>
+<span class="ln">{</span>
+<span class="ln">    struct timespec now, res;</span>
+<span class="ln">    if (clock_gettime(clock, &amp;now) == -1) {</span>
+<span class="ln">        printf(&quot;%-24s unsupported (%s)\n&quot;, name, strerror(errno));</span>
+<span class="ln">        return;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (clock_getres(clock, &amp;res) == -1) {</span>
+<span class="ln">        perror(&quot;clock_getres&quot;);</span>
+<span class="ln">        exit(1);</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;%-24s now=%lld.%09ld res=%ld.%09ld\n&quot;, name,</span>
+<span class="ln">           (long long)now.tv_sec, now.tv_nsec,</span>
+<span class="ln">           (long)res.tv_sec, res.tv_nsec);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    int clocks_only = argc == 2 &amp;&amp; strcmp(argv[1], &quot;--clocks&quot;) == 0;</span>
+<span class="ln">    if (!(argc == 1 || clocks_only)) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s [--clocks]\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (clocks_only) {</span>
+<span class="ln">        show_clock(&quot;CLOCK_REALTIME&quot;, CLOCK_REALTIME);</span>
+<span class="ln">        show_clock(&quot;CLOCK_MONOTONIC&quot;, CLOCK_MONOTONIC);</span>
+<span class="ln">#ifdef CLOCK_MONOTONIC_RAW</span>
+<span class="ln">        show_clock(&quot;CLOCK_MONOTONIC_RAW&quot;, CLOCK_MONOTONIC_RAW);</span>
+<span class="ln">#endif</span>
+<span class="ln">#ifdef CLOCK_PROCESS_CPUTIME_ID</span>
+<span class="ln">        show_clock(&quot;CLOCK_PROCESS_CPUTIME_ID&quot;, CLOCK_PROCESS_CPUTIME_ID);</span>
+<span class="ln">#endif</span>
+<span class="ln">        if (fflush(stdout) == EOF) {</span>
+<span class="ln">            perror(&quot;stdout&quot;);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">        return 0;</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    enum { RUNS = 5 };</span>
+<span class="ln">    long long ns[RUNS];</span>
+<span class="ln">    long long sink = 0;</span>
+<span class="ln">    spin_ns(2000000);   /* 워밍업: 첫 측정의 캐시 효과를 줄인다 */</span>
+<span class="ln">    for (int i = 0; i &lt; RUNS; ++i) {</span>
+<span class="ln">        long long start = now_ns(CLOCK_MONOTONIC);</span>
+<span class="ln">        sink += workload();</span>
+<span class="ln">        ns[i] = now_ns(CLOCK_MONOTONIC) - start;</span>
+<span class="ln">        printf(&quot;run%d=%lldns\n&quot;, i + 1, ns[i]);</span>
+<span class="ln">    }</span>
+<span class="ln">    qsort(ns, RUNS, sizeof ns[0], cmp_ll);</span>
+<span class="ln">    printf(&quot;min=%lldns median=%lldns max=%lldns sink=%lld\n&quot;,</span>
+<span class="ln">           ns[0], ns[RUNS / 2], ns[RUNS - 1], sink);</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="tm_normalize.html">← tm_normalize</a>
+    <a href="tslog.html">tslog →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

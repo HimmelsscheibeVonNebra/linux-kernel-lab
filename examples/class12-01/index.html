@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>12주차 1차시 파이프 (pipe · dup2 · popen · FIFO) · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body data-root="../../">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><span>12주차 1차시</span></nav>
+  <header>
+    <h1>파이프 (pipe · dup2 · popen · FIFO)</h1>
+    <p>pipe로 만든 익명 파이프의 읽기·쓰기 끝과 EOF, SIGPIPE/EPIPE, 용량을 확인하고, 셸의 CMD1 | CMD2 를 pipe · fork · dup2 · exec로 직접 만들며, popen과 FIFO(이름 있는 파이프)를 써 보는 예제입니다.</p>
+  </header>
+  <main class="list">
+    <ul class="cards">
+      <li><a href="pipe_basic.html"><strong>pipe_basic</strong><span>한 프로세스 안에서 pipe()로 파이프를 만들고 쓰기 끝에 쓴 뒤, 쓰기 끝을 닫고 읽기 끝에서 EOF까지 읽습니다.</span></a></li>
+      <li><a href="pipemsg.html"><strong>pipemsg</strong><span>부모가 파이프로 두 줄을 보내고 자식이 읽습니다. 쓰지 않는 끝점 닫기와 EOF의 관계(ok/leak), 읽는 쪽이 없을 때의 SIGPIPE와 EPIPE, 파이프 용량(cap)을 모드별로 확인합니다.</span></a></li>
+      <li><a href="pipe2.html"><strong>pipe2</strong><span>셸의 CMD1 | CMD2 &gt; FILE 을 pipe · fork · dup2 · execvp로 직접 만듭니다. -o FILE은 CMD2의 표준 출력을 파일로 돌리고, -k는 부모가 쓰기 끝을 닫지 않아 EOF가 오지 않는 상황을 재현합니다.</span></a></li>
+      <li><a href="pipeio.html"><strong>pipeio</strong><span>파이프를 쓰는 다른 두 방법을 보여 줍니다. popen은 셸 명령의 출력을 FILE*로 읽고 pclose로 종료 코드를 받으며, recv/send는 mkfifo로 만든 FIFO를 통해 서로 무관한 두 프로세스가 통신합니다.</span></a></li>
+    </ul>
+  </main>
+</body>
+</html>

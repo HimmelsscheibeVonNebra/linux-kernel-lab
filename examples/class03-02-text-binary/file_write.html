@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>file_write — 텍스트와 바이너리 파일 입출력 실습 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class03-02-text-binary">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">3주차 2차시 · text-binary</a><span class="sep">/</span><span>file_write</span></nav>
+  <header>
+    <h1>file_write</h1>
+    <p>open에 O_TRUNC 또는 O_APPEND를 주고 write_all로 TEXT 바이트를 그대로 기록한다. 덮어쓰기와 추가, 그리고 쓰기 오류 처리를 확인한다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class03-02-text-binary</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./file_write truncate text.txt ABCDEFGHIJ; cat text.txt; echo" title="터미널에서 실행" aria-label="실행: ./file_write truncate text.txt ABCDEFGHIJ; cat text.txt; echo">▶</button><code>./file_write truncate text.txt ABCDEFGHIJ; cat text.txt; echo</code></div>
+          <p>10바이트가 기록된다. 줄바꿈이나 NUL은 추가되지 않는다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./file_write append text.txt '!'; cat text.txt; echo" title="터미널에서 실행" aria-label="실행: ./file_write append text.txt '!'; cat text.txt; echo">▶</button><code>./file_write append text.txt '!'; cat text.txt; echo</code></div>
+          <p>O_APPEND로 끝에 덧붙어 ABCDEFGHIJ!가 된다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./file_write truncate text.txt Z; cat text.txt; echo; wc -c &lt; text.txt" title="터미널에서 실행" aria-label="실행: ./file_write truncate text.txt Z; cat text.txt; echo; wc -c &lt; text.txt">▶</button><code>./file_write truncate text.txt Z; cat text.txt; echo; wc -c &lt; text.txt</code></div>
+          <p>O_TRUNC로 기존 내용이 지워져 Z 1바이트만 남는다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./file_write truncate /dev/full X; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./file_write truncate /dev/full X; echo &quot;exit=$?&quot;">▶</button><code>./file_write truncate /dev/full X; echo &quot;exit=$?&quot;</code></div>
+          <p>/dev/full은 쓰기가 항상 ENOSPC로 실패한다. 오류 메시지와 종료 상태 1을 확인한다.</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>file_write.c <span class="muted">29줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln">#include &quot;io_helpers.h&quot;</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char *argv[])</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc != 4) {</span>
+<span class="ln">        fprintf(stderr, &quot;Usage: %s truncate|append FILE TEXT\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    int flags = O_WRONLY | O_CREAT;</span>
+<span class="ln">    if (strcmp(argv[1], &quot;truncate&quot;) == 0) flags |= O_TRUNC;</span>
+<span class="ln">    else if (strcmp(argv[1], &quot;append&quot;) == 0) flags |= O_APPEND;</span>
+<span class="ln">    else { fprintf(stderr, &quot;Unknown mode: %s\n&quot;, argv[1]); return 2; }</span>
+<span class="ln"> </span>
+<span class="ln">    int fd = open(argv[2], flags, 0666);</span>
+<span class="ln">    if (fd == -1) { perror(argv[2]); return 1; }</span>
+<span class="ln">    int status = 0;</span>
+<span class="ln">    /* Store exactly TEXT bytes, with no added newline or terminating NUL. */</span>
+<span class="ln">    if (write_all(fd, argv[3], strlen(argv[3])) == -1) {</span>
+<span class="ln">        perror(&quot;write&quot;);</span>
+<span class="ln">        status = 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    /* On Linux, report close errors without retrying close(). */</span>
+<span class="ln">    if (close(fd) == -1) { perror(&quot;close&quot;); status = 1; }</span>
+<span class="ln">    return status;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+    <details class="source">
+      <summary>io_helpers.h <span class="muted">22줄</span></summary>
+      <pre class="code"><code><span class="ln">#ifndef IO_HELPERS_H</span>
+<span class="ln">#define IO_HELPERS_H</span>
+<span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;stddef.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln">/* Blocking descriptors. Retry interruptions and advance after partial writes. */</span>
+<span class="ln">static int write_all(int fd, const void *data, size_t count)</span>
+<span class="ln">{</span>
+<span class="ln">    const unsigned char *p = data;</span>
+<span class="ln">    while (count &gt; 0) {</span>
+<span class="ln">        ssize_t n = write(fd, p, count);</span>
+<span class="ln">        if (n == -1) {</span>
+<span class="ln">            if (errno == EINTR) continue;</span>
+<span class="ln">            return -1;</span>
+<span class="ln">        }</span>
+<span class="ln">        if (n == 0) { errno = EIO; return -1; }</span>
+<span class="ln">        p += (size_t)n;</span>
+<span class="ln">        count -= (size_t)n;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln">#endif</span></code></pre>
+    </details>
+  </section>
+  <nav class="pager">
+    <span></span>
+    <a href="file_read.html">file_read →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>time_attrs — 파일 속성 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class04-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">4주차 2차시</a><span class="sep">/</span><span>time_attrs</span></nav>
+  <header>
+    <h1>time_attrs</h1>
+    <p>futimens(2)로 atime·mtime을 지정한 값(2024-01-01, 2024-01-02 UTC)으로 바꾸고, fchmod 뒤에도 그 값이 유지되며 ctime만 현재 시각임을 보여 줍니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class04-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="rm -f times.txt" title="터미널에서 실행" aria-label="실행: rm -f times.txt">▶</button><code>rm -f times.txt</code></div>
+          <p>O_EXCL로 새로 만들므로 기존 파일을 먼저 지웁니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./time_attrs times.txt" title="터미널에서 실행" aria-label="실행: ./time_attrs times.txt">▶</button><code>./time_attrs times.txt</code></div>
+          <p>두 줄 모두 atime=1704067200 mtime=1704153600이고 mode만 0600에서 0640으로 바뀝니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="stat -c 'atime=%X mtime=%Y ctime=%Z' times.txt" title="터미널에서 실행" aria-label="실행: stat -c 'atime=%X mtime=%Y ctime=%Z' times.txt">▶</button><code>stat -c 'atime=%X mtime=%Y ctime=%Z' times.txt</code></div>
+          <p>ctime은 지정할 수 없으며 방금 변경한 현재 시각입니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="date -d @1704153600" title="터미널에서 실행" aria-label="실행: date -d @1704153600">▶</button><code>date -d @1704153600</code></div>
+          <p>mtime 값을 달력 시각으로 바꿔 봅니다(KST 2024-01-02 09:00).</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="ls -l times.txt" title="터미널에서 실행" aria-label="실행: ls -l times.txt">▶</button><code>ls -l times.txt</code></div>
+          <p>ls가 보여 주는 날짜는 mtime(2024년 1월 2일)입니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./time_attrs times.txt; echo &quot;status=$?&quot;" title="터미널에서 실행" aria-label="실행: ./time_attrs times.txt; echo &quot;status=$?&quot;">▶</button><code>./time_attrs times.txt; echo &quot;status=$?&quot;</code></div>
+          <p>이미 있는 경로는 'File exists'로 실패합니다(상태 1).</p>
+        </li>
+      </ol>
+      <p class="callout">time_t가 32비트이지만 지정한 시각은 2038년 이전이라 문제없습니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>time_attrs.c <span class="muted">33줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;fcntl.h&gt;</span>
+<span class="ln">#include &lt;inttypes.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;sys/stat.h&gt;</span>
+<span class="ln">#include &lt;time.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">static int show(const char *label, int fd)</span>
+<span class="ln">{</span>
+<span class="ln">    struct stat st;</span>
+<span class="ln">    if (fstat(fd, &amp;st) == -1) { perror(&quot;fstat&quot;); return 1; }</span>
+<span class="ln">    printf(&quot;%s mode=%04jo atime=%jd mtime=%jd ctime=%jd\n&quot;, label,</span>
+<span class="ln">           (uintmax_t)(st.st_mode &amp; 07777), (intmax_t)st.st_atime,</span>
+<span class="ln">           (intmax_t)st.st_mtime, (intmax_t)st.st_ctime);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc != 2) { fprintf(stderr, &quot;usage: %s NEW_PATH\n&quot;, argv[0]); return 2; }</span>
+<span class="ln">    int fd = open(argv[1], O_WRONLY | O_CREAT | O_EXCL, 0600);</span>
+<span class="ln">    if (fd == -1) { perror(argv[1]); return 1; }</span>
+<span class="ln">    int result = 1;</span>
+<span class="ln">    struct timespec ts[2] = {{1704067200, 0}, {1704153600, 0}};</span>
+<span class="ln">    if (futimens(fd, ts) == -1) { perror(&quot;futimens&quot;); goto done; }</span>
+<span class="ln">    if (show(&quot;after_futimens&quot;, fd) != 0) goto done;</span>
+<span class="ln">    if (fchmod(fd, 0640) == -1) { perror(&quot;fchmod&quot;); goto done; }</span>
+<span class="ln">    if (show(&quot;after_fchmod&quot;, fd) != 0) goto done;</span>
+<span class="ln">    result = 0;</span>
+<span class="ln">done:</span>
+<span class="ln">    if (close(fd) == -1) { perror(&quot;close&quot;); result = 1; }</span>
+<span class="ln">    if (fflush(stdout) == EOF) { perror(&quot;stdout&quot;); result = 1; }</span>
+<span class="ln">    return result;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="sparse_demo.html">← sparse_demo</a>
+    <a href="fd_unlink_demo.html">fd_unlink_demo →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

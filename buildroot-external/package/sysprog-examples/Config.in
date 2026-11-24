@@ -1,0 +1,6 @@
+config BR2_PACKAGE_SYSPROG_EXAMPLES
+	bool "sysprog-examples"
+	help
+	  User-space system programming examples (sources live in
+	  sysprog/ at the repository root), installed with their
+	  sources under /home/student/<class>/.

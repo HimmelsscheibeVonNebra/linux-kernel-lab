@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>11주차 1차시 메모리 매핑 (mmap) · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body data-root="../../">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><span>11주차 1차시</span></nav>
+  <header>
+    <h1>메모리 매핑 (mmap)</h1>
+    <p>mmap으로 익명·파일 매핑을 만들고, MAP_PRIVATE와 MAP_SHARED의 차이, fork 뒤의 공유와 경쟁 상태, read와 mmap의 page fault 차이를 확인하는 예제입니다.</p>
+  </header>
+  <main class="list">
+    <ul class="cards">
+      <li><a href="mmap_basic.html"><strong>mmap_basic</strong><span>파일 없이 정수 하나 크기의 익명 매핑(MAP_PRIVATE | MAP_ANONYMOUS)을 만들고 42를 쓰고 읽은 뒤 munmap으로 해제하는 입문 예제입니다.</span></a></li>
+      <li><a href="mapcat.html"><strong>mapcat</strong><span>파일을 open · fstat한 뒤 mmap(PROT_READ, MAP_PRIVATE)으로 매핑해 read 없이 write로 표준 출력에 내보냅니다. -p 옵션은 매핑을 유지한 채 기다려 /proc/PID/maps를 관찰하게 합니다.</span></a></li>
+      <li><a href="mapmode.html"><strong>mapmode</strong><span>매핑 플래그에 따라 수정이 어디까지 보이는지 확인합니다. private/shared는 첫 줄을 대문자로 바꾼 뒤 pread로 파일을 다시 읽고, anon은 fork 뒤 전역 변수와 익명 공유 매핑을 비교하며, race는 여러 자식이 공유 카운터를 잠금 없이 올립니다.</span></a></li>
+      <li><a href="countnl.html"><strong>countnl</strong><span>같은 파일의 개행 수를 read(64 KiB 버퍼)와 mmap으로 세고, 경과 시간과 minor/major page fault 수(getrusage)를 출력합니다. drop은 posix_fadvise(DONTNEED)로 그 파일의 페이지 캐시를 비워 달라고 요청합니다.</span></a></li>
+    </ul>
+  </main>
+</body>
+</html>

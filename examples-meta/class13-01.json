@@ -1,0 +1,64 @@
+{
+  "class": "class13-01",
+  "title": "IPC와 POSIX 메시지 큐",
+  "summary": "fork 뒤에는 메모리가 격리된다는 점에서 IPC의 필요성을 확인하고, POSIX 메시지 큐(mq_open · mq_send · mq_receive)의 우선순위·메시지 경계·블로킹과 요청/응답 큐를 쓰는 서버–클라이언트를 다루는 예제입니다.",
+  "examples": [
+    {
+      "name": "isolated",
+      "source": "isolated.c",
+      "summary": "fork 뒤에 자식이 전역 변수와 힙의 값을 고쳐도 부모에게는 보이지 않음을 보여 줍니다. 가상 주소는 같지만 서로 다른 메모리이며, 부모에게 돌아오는 것은 8비트 종료 상태뿐입니다.",
+      "steps": [
+        { "cmd": "./isolated", "note": "자식은 counter=101, *heap=201 이지만 부모는 100, 200 그대로다. 괄호 안의 주소는 양쪽이 같다. 부모가 받은 것은 종료 상태 42뿐이다." },
+        { "cmd": "strace -f -e trace=clone,wait4,exit_group ./isolated 2>&1 | tail -8", "note": "clone으로 자식이 생기고, 자식의 exit_group(42)가 부모의 wait4 결과로 전달되는 과정을 확인한다." }
+      ],
+      "manual": false,
+      "expect": "종료 상태 42"
+    },
+    {
+      "name": "pmq",
+      "source": "pmq.c",
+      "summary": "POSIX 메시지 큐를 명령 하나씩으로 다룹니다: mq_open(O_CREAT | O_EXCL)으로 만들고, mq_send로 우선순위와 함께 넣고, mq_receive로 꺼내고, mq_getattr로 상태를 보고, mq_unlink로 지웁니다.",
+      "steps": [
+        { "cmd": "./pmq unlink /lab 2>/dev/null; ./pmq create /lab; ls -l /dev/mqueue", "note": "큐를 만든다 (기본 maxmsg=10, msgsize=128). 프로세스가 끝나도 이름이 /dev/mqueue/lab 으로 남아 있다." },
+        { "cmd": "./pmq send /lab 1 low-a; ./pmq send /lab 5 urgent; ./pmq send /lab 1 low-b; ./pmq stat /lab", "note": "우선순위 1, 5, 1로 세 개를 넣는다. stat에서 curmsgs=3." },
+        { "cmd": "cat /dev/mqueue/lab", "note": "커널이 보여 주는 큐 상태: QSIZE는 쌓인 바이트 수(5 + 6 + 5 = 16)다." },
+        { "cmd": "./pmq recv /lab; ./pmq recv /lab; ./pmq recv /lab", "note": "넣은 순서가 아니라 우선순위가 높은 urgent(prio=5)가 먼저 나오고, 같은 우선순위끼리는 넣은 순서(low-a, low-b)다. len은 보낸 길이 그대로다 (메시지 경계 유지)." },
+        { "cmd": "./pmq recv /lab -n; echo \"exit=$?\"", "note": "빈 큐에서 O_NONBLOCK으로 꺼내면 기다리지 않고 EAGAIN(Resource temporarily unavailable)으로 실패한다." },
+        { "cmd": "./pmq recv /lab & sleep 1; ./pmq send /lab 2 wake; wait; ./pmq unlink /lab", "note": "-n 없이 꺼내면 빈 큐에서 잠든다. 1초 뒤 메시지가 들어오자 깨어나 wake를 받는다. 마지막에 이름을 지운다." }
+      ],
+      "manual": false,
+      "expect": "prio=5 len=6 \"urgent\"",
+      "notes": "큐 이름은 반드시 /로 시작해야 합니다. 일반 사용자는 /proc/sys/fs/mqueue의 한도(msg_max 10, msgsize_max 8192)를 넘는 큐를 만들 수 없습니다 (예: ./pmq create /big 100000 128 → Invalid argument)."
+    },
+    {
+      "name": "mqserver",
+      "source": "mqserver.c",
+      "summary": "요청 큐 /w13_req 하나로 여러 클라이언트의 요청을 받아 대문자로 바꾼 뒤, 클라이언트마다 다른 응답 큐(/w13_rep.PID)로 돌려주는 서버입니다. SIGINT/SIGTERM을 받으면 큐를 지우고 끝납니다.",
+      "steps": [
+        { "cmd": "./mqclient hello; echo \"exit=$?\"", "note": "서버를 띄우기 전: 요청 큐가 없어 '서버가 없다' 오류로 끝난다 (exit=1)." },
+        { "cmd": "./mqserver & sleep 1; ls -l /dev/mqueue", "note": "서버가 /w13_req 큐를 만들고 mq_receive에서 기다린다. /dev/mqueue에 w13_req가 보인다." },
+        { "cmd": "./mqclient hello", "note": "서버 기록 '[서버] #1 PID n: hello → HELLO' 와 클라이언트가 받은 답이 출력된다." },
+        { "cmd": "./mqclient world; ls /dev/mqueue", "note": "순번이 #2로 올라간다. 클라이언트의 응답 큐(w13_rep.PID)는 클라이언트가 지워서 남아 있지 않다." },
+        { "cmd": "kill -INT $!; wait; ls /dev/mqueue", "note": "Ctrl-C 대신 SIGINT를 보낸다. mq_receive가 EINTR로 깨어나고 서버는 큐를 mq_unlink한 뒤 끝난다 ('[서버] 끝: /w13_req 지움')." }
+      ],
+      "manual": false,
+      "expect": "hello → HELLO",
+      "notes": "터미널이 하나라 서버를 백그라운드(&)로 띄웁니다. $!는 마지막 백그라운드 프로세스(서버)의 PID이므로 단계 사이에 다른 백그라운드 명령을 실행하지 마세요."
+    },
+    {
+      "name": "mqclient",
+      "source": "mqclient.c",
+      "summary": "자기 응답 큐(/w13_rep.PID)를 먼저 만든 뒤 서버의 요청 큐에 요청을 넣고, mq_timedreceive로 최대 3초까지 답을 기다리는 클라이언트입니다. quit을 보내면 서버가 끝납니다.",
+      "steps": [
+        { "cmd": "./mqserver & SRV=$!; sleep 1", "note": "서버를 백그라운드로 띄우고 PID를 SRV에 적어 둔다." },
+        { "cmd": "./mqclient apple & ./mqclient banana & ./mqclient cherry; sleep 1", "note": "클라이언트 셋이 동시에 묻는다. 응답 큐가 PID마다 달라 각자 자기 답(APPLE, BANANA, CHERRY)을 받는다." },
+        { "cmd": "kill -STOP $SRV; time ./mqclient late; kill -CONT $SRV; sleep 1", "note": "서버를 멈춰 두면 클라이언트는 3초 뒤 '응답 없음: mq_timedreceive: Connection timed out'으로 포기한다. 서버를 다시 깨우면 뒤늦게 처리하려다 '응답 큐 없음'을 기록한다." },
+        { "cmd": "./mqclient quit; wait", "note": "quit 요청에는 응답이 없다. 서버가 요청 큐를 지우고 끝난다." },
+        { "cmd": "ls /dev/mqueue", "note": "요청 큐와 응답 큐가 모두 지워져 남은 것이 없다." }
+      ],
+      "manual": false,
+      "expect": "apple → APPLE",
+      "notes": "mqclient는 mqserver가 떠 있어야 동작하므로 첫 단계에서 서버를 함께 띄웁니다. 셋째 단계는 타임아웃을 기다리느라 약 4초 걸립니다."
+    }
+  ]
+}

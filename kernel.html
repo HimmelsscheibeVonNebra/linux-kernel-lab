@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>커널 모듈 실습 · Linux Lab</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="vendor/xterm/xterm.css">
+  <script src="vendor/xterm/xterm.js"></script>
+  <script src="build/libv86.js"></script>
+</head>
+<body data-root="">
+  <nav class="crumbs"><a href="index.html">Linux Lab</a><span class="sep">/</span><span>커널 모듈 실습</span></nav>
+  <header>
+    <h1>커널 모듈 실습</h1>
+    <p>브라우저 안에서 부팅한 Linux 커널에 모듈을 로드·제거하고 로그, /proc, /sys, /dev를 확인합니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>root</code> 셸로 시작합니다. 모듈은 <code>/root/*.ko</code>, 소스는 <code>/root/src</code>에 있습니다. 올린 파일은 <code>/mnt/host</code>에 나타나며, 같은 커널로 빌드한 <code>.ko</code>를 올려 <code>insmod</code> 할 수 있습니다.</p>
+    </section>
+    <aside class="guide">
+      <details open>
+        <summary>01 · 첫 커널 모듈</summary>
+        <p>모듈을 로드·제거하고 커널 로그에서 init/exit 메시지를 확인합니다.</p>
+        <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="uname -a" title="터미널에서 실행" aria-label="실행: uname -a">▶</button><code>uname -a</code></div>
+          <p>32비트 x86 실습 커널인지 확인</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="insmod hello.ko" title="터미널에서 실행" aria-label="실행: insmod hello.ko">▶</button><code>insmod hello.ko</code></div>
+          <p>hello_init() 실행 — Hello from Linux Kernel!</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="lsmod" title="터미널에서 실행" aria-label="실행: lsmod">▶</button><code>lsmod</code></div>
+          <p>로드된 모듈 목록에 hello가 보입니다</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="rmmod hello" title="터미널에서 실행" aria-label="실행: rmmod hello">▶</button><code>rmmod hello</code></div>
+          <p>hello_exit() 실행 — Goodbye from Linux Kernel!</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="dmesg | tail -n 5" title="터미널에서 실행" aria-label="실행: dmesg | tail -n 5">▶</button><code>dmesg | tail -n 5</code></div>
+          <p>커널 로그 버퍼에서 두 메시지를 다시 확인</p>
+        </li>
+      </ol>
+      </details>
+      <details>
+        <summary>02 · procfs</summary>
+        <p>/proc/kernellab 항목을 만들고 읽을 때마다 커널 함수가 호출되는 것을 봅니다.</p>
+        <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="insmod proc_demo.ko" title="터미널에서 실행" aria-label="실행: insmod proc_demo.ko">▶</button><code>insmod proc_demo.ko</code></div>
+          <p>/proc/kernellab 생성</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="cat /proc/kernellab" title="터미널에서 실행" aria-label="실행: cat /proc/kernellab">▶</button><code>cat /proc/kernellab</code></div>
+          <p>읽을 때마다 kernellab_show()가 실행됩니다</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="cat /proc/kernellab" title="터미널에서 실행" aria-label="실행: cat /proc/kernellab">▶</button><code>cat /proc/kernellab</code></div>
+          <p>read_count가 1 증가</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="rmmod proc_demo" title="터미널에서 실행" aria-label="실행: rmmod proc_demo">▶</button><code>rmmod proc_demo</code></div>
+          <p>항목 제거</p>
+        </li>
+      </ol>
+      </details>
+      <details>
+        <summary>03 · sysfs</summary>
+        <p>kobject와 속성 파일로 커널 변수 하나를 사용자 공간에 노출합니다.</p>
+        <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="insmod sysfs_demo.ko" title="터미널에서 실행" aria-label="실행: insmod sysfs_demo.ko">▶</button><code>insmod sysfs_demo.ko</code></div>
+          <p>/sys/kernel/kernellab/value 생성</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="cat /sys/kernel/kernellab/value" title="터미널에서 실행" aria-label="실행: cat /sys/kernel/kernellab/value">▶</button><code>cat /sys/kernel/kernellab/value</code></div>
+          <p>value_show() — 초기값 0</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="echo 42 &gt; /sys/kernel/kernellab/value" title="터미널에서 실행" aria-label="실행: echo 42 &gt; /sys/kernel/kernellab/value">▶</button><code>echo 42 &gt; /sys/kernel/kernellab/value</code></div>
+          <p>value_store()가 값을 바꿉니다</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="cat /sys/kernel/kernellab/value" title="터미널에서 실행" aria-label="실행: cat /sys/kernel/kernellab/value">▶</button><code>cat /sys/kernel/kernellab/value</code></div>
+          <p>42</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="rmmod sysfs_demo" title="터미널에서 실행" aria-label="실행: rmmod sysfs_demo">▶</button><code>rmmod sysfs_demo</code></div>
+          <p>kobject 제거</p>
+        </li>
+      </ol>
+      </details>
+      <details>
+        <summary>04 · 문자 디바이스</summary>
+        <p>문자 디바이스를 등록하고 /dev/kernellab에 쓴 내용을 다시 읽습니다.</p>
+        <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="insmod chardev_demo.ko" title="터미널에서 실행" aria-label="실행: insmod chardev_demo.ko">▶</button><code>insmod chardev_demo.ko</code></div>
+          <p>장치 번호 할당, /dev/kernellab 자동 생성</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="ls -l /dev/kernellab" title="터미널에서 실행" aria-label="실행: ls -l /dev/kernellab">▶</button><code>ls -l /dev/kernellab</code></div>
+          <p>문자 디바이스(c)와 major/minor 번호</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="echo hello &gt; /dev/kernellab" title="터미널에서 실행" aria-label="실행: echo hello &gt; /dev/kernellab">▶</button><code>echo hello &gt; /dev/kernellab</code></div>
+          <p>lab_write()가 버퍼에 저장</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="cat /dev/kernellab" title="터미널에서 실행" aria-label="실행: cat /dev/kernellab">▶</button><code>cat /dev/kernellab</code></div>
+          <p>lab_read()가 버퍼를 돌려줍니다</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="rmmod chardev_demo" title="터미널에서 실행" aria-label="실행: rmmod chardev_demo">▶</button><code>rmmod chardev_demo</code></div>
+          <p>장치 해제</p>
+        </li>
+      </ol>
+      </details>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>hello.c <span class="muted">21줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;linux/init.h&gt;</span>
+<span class="ln">#include &lt;linux/module.h&gt;</span>
+<span class="ln">#include &lt;linux/kernel.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">MODULE_LICENSE(&quot;GPL&quot;);</span>
+<span class="ln">MODULE_AUTHOR(&quot;Kernel Lab&quot;);</span>
+<span class="ln">MODULE_DESCRIPTION(&quot;First kernel module&quot;);</span>
+<span class="ln"> </span>
+<span class="ln">static int __init hello_init(void)</span>
+<span class="ln">{</span>
+<span class="ln">	pr_info(&quot;Hello from Linux Kernel!\n&quot;);</span>
+<span class="ln">	return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void __exit hello_exit(void)</span>
+<span class="ln">{</span>
+<span class="ln">	pr_info(&quot;Goodbye from Linux Kernel!\n&quot;);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">module_init(hello_init);</span>
+<span class="ln">module_exit(hello_exit);</span></code></pre>
+    </details>
+    <details class="source">
+      <summary>proc_demo.c <span class="muted">43줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;linux/init.h&gt;</span>
+<span class="ln">#include &lt;linux/module.h&gt;</span>
+<span class="ln">#include &lt;linux/kernel.h&gt;</span>
+<span class="ln">#include &lt;linux/proc_fs.h&gt;</span>
+<span class="ln">#include &lt;linux/seq_file.h&gt;</span>
+<span class="ln">#include &lt;linux/jiffies.h&gt;</span>
+<span class="ln">#include &lt;linux/atomic.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">MODULE_LICENSE(&quot;GPL&quot;);</span>
+<span class="ln">MODULE_AUTHOR(&quot;Kernel Lab&quot;);</span>
+<span class="ln">MODULE_DESCRIPTION(&quot;procfs example: /proc/kernellab&quot;);</span>
+<span class="ln"> </span>
+<span class="ln">#define PROC_NAME &quot;kernellab&quot;</span>
+<span class="ln"> </span>
+<span class="ln">static atomic_t read_count = ATOMIC_INIT(0);</span>
+<span class="ln"> </span>
+<span class="ln">/* Called every time user space reads /proc/kernellab. */</span>
+<span class="ln">static int kernellab_show(struct seq_file *m, void *v)</span>
+<span class="ln">{</span>
+<span class="ln">	seq_puts(m, &quot;Hello from /proc/kernellab\n&quot;);</span>
+<span class="ln">	seq_printf(m, &quot;jiffies:    %lu\n&quot;, jiffies);</span>
+<span class="ln">	seq_printf(m, &quot;HZ:         %d\n&quot;, HZ);</span>
+<span class="ln">	seq_printf(m, &quot;read_count: %d\n&quot;, atomic_inc_return(&amp;read_count));</span>
+<span class="ln">	return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int __init proc_demo_init(void)</span>
+<span class="ln">{</span>
+<span class="ln">	if (!proc_create_single(PROC_NAME, 0444, NULL, kernellab_show))</span>
+<span class="ln">		return -ENOMEM;</span>
+<span class="ln"> </span>
+<span class="ln">	pr_info(&quot;proc_demo: created /proc/%s\n&quot;, PROC_NAME);</span>
+<span class="ln">	return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void __exit proc_demo_exit(void)</span>
+<span class="ln">{</span>
+<span class="ln">	remove_proc_entry(PROC_NAME, NULL);</span>
+<span class="ln">	pr_info(&quot;proc_demo: removed /proc/%s\n&quot;, PROC_NAME);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">module_init(proc_demo_init);</span>
+<span class="ln">module_exit(proc_demo_exit);</span></code></pre>
+    </details>
+    <details class="source">
+      <summary>sysfs_demo.c <span class="muted">61줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;linux/init.h&gt;</span>
+<span class="ln">#include &lt;linux/module.h&gt;</span>
+<span class="ln">#include &lt;linux/kernel.h&gt;</span>
+<span class="ln">#include &lt;linux/kobject.h&gt;</span>
+<span class="ln">#include &lt;linux/sysfs.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">MODULE_LICENSE(&quot;GPL&quot;);</span>
+<span class="ln">MODULE_AUTHOR(&quot;Kernel Lab&quot;);</span>
+<span class="ln">MODULE_DESCRIPTION(&quot;sysfs example: /sys/kernel/kernellab/value&quot;);</span>
+<span class="ln"> </span>
+<span class="ln">static struct kobject *lab_kobj;</span>
+<span class="ln">static int value;</span>
+<span class="ln"> </span>
+<span class="ln">/* cat /sys/kernel/kernellab/value */</span>
+<span class="ln">static ssize_t value_show(struct kobject *kobj, struct kobj_attribute *attr,</span>
+<span class="ln">			  char *buf)</span>
+<span class="ln">{</span>
+<span class="ln">	return sysfs_emit(buf, &quot;%d\n&quot;, value);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* echo 42 &gt; /sys/kernel/kernellab/value */</span>
+<span class="ln">static ssize_t value_store(struct kobject *kobj, struct kobj_attribute *attr,</span>
+<span class="ln">			   const char *buf, size_t count)</span>
+<span class="ln">{</span>
+<span class="ln">	int ret = kstrtoint(buf, 10, &amp;value);</span>
+<span class="ln"> </span>
+<span class="ln">	if (ret)</span>
+<span class="ln">		return ret;</span>
+<span class="ln"> </span>
+<span class="ln">	pr_info(&quot;sysfs_demo: value set to %d\n&quot;, value);</span>
+<span class="ln">	return count;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static struct kobj_attribute value_attr = __ATTR_RW(value);</span>
+<span class="ln"> </span>
+<span class="ln">static int __init sysfs_demo_init(void)</span>
+<span class="ln">{</span>
+<span class="ln">	int ret;</span>
+<span class="ln"> </span>
+<span class="ln">	lab_kobj = kobject_create_and_add(&quot;kernellab&quot;, kernel_kobj);</span>
+<span class="ln">	if (!lab_kobj)</span>
+<span class="ln">		return -ENOMEM;</span>
+<span class="ln"> </span>
+<span class="ln">	ret = sysfs_create_file(lab_kobj, &amp;value_attr.attr);</span>
+<span class="ln">	if (ret) {</span>
+<span class="ln">		kobject_put(lab_kobj);</span>
+<span class="ln">		return ret;</span>
+<span class="ln">	}</span>
+<span class="ln"> </span>
+<span class="ln">	pr_info(&quot;sysfs_demo: created /sys/kernel/kernellab/value\n&quot;);</span>
+<span class="ln">	return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void __exit sysfs_demo_exit(void)</span>
+<span class="ln">{</span>
+<span class="ln">	kobject_put(lab_kobj);</span>
+<span class="ln">	pr_info(&quot;sysfs_demo: removed /sys/kernel/kernellab\n&quot;);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">module_init(sysfs_demo_init);</span>
+<span class="ln">module_exit(sysfs_demo_exit);</span></code></pre>
+    </details>
+    <details class="source">
+      <summary>chardev_demo.c <span class="muted">125줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;linux/init.h&gt;</span>
+<span class="ln">#include &lt;linux/module.h&gt;</span>
+<span class="ln">#include &lt;linux/kernel.h&gt;</span>
+<span class="ln">#include &lt;linux/fs.h&gt;</span>
+<span class="ln">#include &lt;linux/cdev.h&gt;</span>
+<span class="ln">#include &lt;linux/device.h&gt;</span>
+<span class="ln">#include &lt;linux/mutex.h&gt;</span>
+<span class="ln">#include &lt;linux/uaccess.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">MODULE_LICENSE(&quot;GPL&quot;);</span>
+<span class="ln">MODULE_AUTHOR(&quot;Kernel Lab&quot;);</span>
+<span class="ln">MODULE_DESCRIPTION(&quot;Character device example: /dev/kernellab&quot;);</span>
+<span class="ln"> </span>
+<span class="ln">#define DEV_NAME &quot;kernellab&quot;</span>
+<span class="ln">#define BUF_SIZE 256</span>
+<span class="ln"> </span>
+<span class="ln">static dev_t devno;</span>
+<span class="ln">static struct cdev lab_cdev;</span>
+<span class="ln">static struct class *lab_class;</span>
+<span class="ln"> </span>
+<span class="ln">static char buffer[BUF_SIZE];</span>
+<span class="ln">static size_t data_len;</span>
+<span class="ln">static DEFINE_MUTEX(lab_lock);</span>
+<span class="ln"> </span>
+<span class="ln">static int lab_open(struct inode *inode, struct file *file)</span>
+<span class="ln">{</span>
+<span class="ln">	pr_info(&quot;chardev_demo: open\n&quot;);</span>
+<span class="ln">	return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int lab_release(struct inode *inode, struct file *file)</span>
+<span class="ln">{</span>
+<span class="ln">	pr_info(&quot;chardev_demo: release\n&quot;);</span>
+<span class="ln">	return 0;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* cat /dev/kernellab : return what was written last */</span>
+<span class="ln">static ssize_t lab_read(struct file *file, char __user *ubuf, size_t count,</span>
+<span class="ln">			loff_t *ppos)</span>
+<span class="ln">{</span>
+<span class="ln">	ssize_t ret;</span>
+<span class="ln"> </span>
+<span class="ln">	mutex_lock(&amp;lab_lock);</span>
+<span class="ln">	ret = simple_read_from_buffer(ubuf, count, ppos, buffer, data_len);</span>
+<span class="ln">	mutex_unlock(&amp;lab_lock);</span>
+<span class="ln">	return ret;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">/* echo hi &gt; /dev/kernellab : replace the stored message */</span>
+<span class="ln">static ssize_t lab_write(struct file *file, const char __user *ubuf,</span>
+<span class="ln">			 size_t count, loff_t *ppos)</span>
+<span class="ln">{</span>
+<span class="ln">	size_t len = min_t(size_t, count, BUF_SIZE);</span>
+<span class="ln"> </span>
+<span class="ln">	mutex_lock(&amp;lab_lock);</span>
+<span class="ln">	if (copy_from_user(buffer, ubuf, len)) {</span>
+<span class="ln">		mutex_unlock(&amp;lab_lock);</span>
+<span class="ln">		return -EFAULT;</span>
+<span class="ln">	}</span>
+<span class="ln">	data_len = len;</span>
+<span class="ln">	mutex_unlock(&amp;lab_lock);</span>
+<span class="ln"> </span>
+<span class="ln">	pr_info(&quot;chardev_demo: stored %zu bytes\n&quot;, len);</span>
+<span class="ln">	return count;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static const struct file_operations lab_fops = {</span>
+<span class="ln">	.owner   = THIS_MODULE,</span>
+<span class="ln">	.open    = lab_open,</span>
+<span class="ln">	.release = lab_release,</span>
+<span class="ln">	.read    = lab_read,</span>
+<span class="ln">	.write   = lab_write,</span>
+<span class="ln">};</span>
+<span class="ln"> </span>
+<span class="ln">static int __init chardev_demo_init(void)</span>
+<span class="ln">{</span>
+<span class="ln">	struct device *dev;</span>
+<span class="ln">	int ret;</span>
+<span class="ln"> </span>
+<span class="ln">	ret = alloc_chrdev_region(&amp;devno, 0, 1, DEV_NAME);</span>
+<span class="ln">	if (ret)</span>
+<span class="ln">		return ret;</span>
+<span class="ln"> </span>
+<span class="ln">	cdev_init(&amp;lab_cdev, &amp;lab_fops);</span>
+<span class="ln">	ret = cdev_add(&amp;lab_cdev, devno, 1);</span>
+<span class="ln">	if (ret)</span>
+<span class="ln">		goto err_region;</span>
+<span class="ln"> </span>
+<span class="ln">	lab_class = class_create(DEV_NAME);</span>
+<span class="ln">	if (IS_ERR(lab_class)) {</span>
+<span class="ln">		ret = PTR_ERR(lab_class);</span>
+<span class="ln">		goto err_cdev;</span>
+<span class="ln">	}</span>
+<span class="ln"> </span>
+<span class="ln">	/* devtmpfs creates /dev/kernellab automatically */</span>
+<span class="ln">	dev = device_create(lab_class, NULL, devno, NULL, DEV_NAME);</span>
+<span class="ln">	if (IS_ERR(dev)) {</span>
+<span class="ln">		ret = PTR_ERR(dev);</span>
+<span class="ln">		goto err_class;</span>
+<span class="ln">	}</span>
+<span class="ln"> </span>
+<span class="ln">	pr_info(&quot;chardev_demo: registered /dev/%s (major %d, minor %d)\n&quot;,</span>
+<span class="ln">		DEV_NAME, MAJOR(devno), MINOR(devno));</span>
+<span class="ln">	return 0;</span>
+<span class="ln"> </span>
+<span class="ln">err_class:</span>
+<span class="ln">	class_destroy(lab_class);</span>
+<span class="ln">err_cdev:</span>
+<span class="ln">	cdev_del(&amp;lab_cdev);</span>
+<span class="ln">err_region:</span>
+<span class="ln">	unregister_chrdev_region(devno, 1);</span>
+<span class="ln">	return ret;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void __exit chardev_demo_exit(void)</span>
+<span class="ln">{</span>
+<span class="ln">	device_destroy(lab_class, devno);</span>
+<span class="ln">	class_destroy(lab_class);</span>
+<span class="ln">	cdev_del(&amp;lab_cdev);</span>
+<span class="ln">	unregister_chrdev_region(devno, 1);</span>
+<span class="ln">	pr_info(&quot;chardev_demo: unregistered /dev/%s\n&quot;, DEV_NAME);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">module_init(chardev_demo_init);</span>
+<span class="ln">module_exit(chardev_demo_exit);</span></code></pre>
+    </details>
+  </section>
+  <script src="js/lab.js"></script>
+</body>
+</html>

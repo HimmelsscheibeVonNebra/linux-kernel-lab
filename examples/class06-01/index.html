@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>6주차 1차시 프로세스 정체성·인자·환경 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body data-root="../../">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><span>6주차 1차시</span></nav>
+  <header>
+    <h1>프로세스 정체성·인자·환경</h1>
+    <p>프로세스의 PID·PPID·PGID·SID, 명령행 인자, 환경 변수, 작업 디렉토리, 자격 증명을 조회하고 ps·/proc과 교차 확인하는 예제입니다.</p>
+  </header>
+  <main class="list">
+    <ul class="cards">
+      <li><a href="id_probe.html"><strong>id_probe</strong><span>getpid·getppid·getpgrp·getsid로 프로세스 정체성을 출력하고 ttyname으로 표준 입력에 연결된 터미널을 확인합니다.</span></a></li>
+      <li><a href="arg_show.html"><strong>arg_show</strong><span>argc와 argv 배열을 출력하고 argv[argc]가 NULL임을 보여 줍니다. argv[0]은 호출 쪽이 정하는 값이라 프로그램 판별에 쓸 수 없음을 확인합니다.</span></a></li>
+      <li><a href="env_dump.html"><strong>env_dump</strong><span>environ 배열을 순회해 환경 전체를 출력하고, --find/--set/--unset으로 getenv·setenv·unsetenv의 동작과 변경 범위(이 프로세스 안)를 관찰합니다.</span></a></li>
+      <li><a href="cwd_probe.html"><strong>cwd_probe</strong><span>getcwd를 버퍼 전달 방식과 (NULL, 0) 할당 방식 두 가지로 호출하고, 인자가 있으면 chdir(2) 후 다시 조회합니다. 실패 경로(ENOENT·ENOTDIR)도 확인합니다.</span></a></li>
+      <li><a href="procinfo.html"><strong>procinfo</strong><span>정체성(pid·ppid·pgid·sid·tty), 자격 증명(uid·euid·gid·egid), 작업 디렉토리, 인자, 환경 요약을 한 번에 출력하는 종합 보고서입니다. --argv, --env로 전체 목록을 볼 수 있습니다.</span></a></li>
+    </ul>
+  </main>
+</body>
+</html>

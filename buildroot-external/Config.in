@@ -1,0 +1,2 @@
+source "$BR2_EXTERNAL_KERNELLAB_PATH/package/kernellab-modules/Config.in"
+source "$BR2_EXTERNAL_KERNELLAB_PATH/package/sysprog-examples/Config.in"

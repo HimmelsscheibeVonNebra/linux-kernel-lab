@@ -1,0 +1,166 @@
+{
+  "class": "class09-02",
+  "title": "시그널 심화: 블록·보류·sigsuspend·안전한 핸들러",
+  "summary": "sigprocmask로 블록한 시그널의 보류, pause와 sigsuspend의 차이, async-signal-safe 핸들러 규범, SIGCHLD와 좀비 수거, kill로 주고받는 SIGUSR1·SIGUSR2를 다룬다.",
+  "examples": [
+    {
+      "name": "signal_basic",
+      "source": "signal_basic.c",
+      "summary": "sigaction()으로 SIGINT와 SIGUSR1 핸들러를 등록하고 pause()로 시그널을 기다립니다. 핸들러 안에서는 async-signal-safe한 write()만 사용합니다.",
+      "steps": [
+        {
+          "cmd": "./signal_basic &",
+          "note": "백그라운드로 실행 — ready PID=... 출력 후 pause()에서 대기"
+        },
+        {
+          "cmd": "sleep 1; kill -USR1 $!; sleep 1",
+          "note": "SIGUSR1 전달 — received SIGUSR1"
+        },
+        {
+          "cmd": "kill -INT $!; sleep 1",
+          "note": "SIGINT 전달 — 핸들러가 있으므로 종료되지 않고 received SIGINT"
+        },
+        {
+          "cmd": "kill -TERM $!; wait",
+          "note": "핸들러가 없는 SIGTERM으로 종료"
+        }
+      ],
+      "manual": false,
+      "expect": "received SIGUSR1",
+      "notes": "포그라운드로 ./signal_basic 을 실행하고 Ctrl+C를 눌러도 received SIGINT가 출력됩니다. 이 경우 종료는 Ctrl+\\ (SIGQUIT)로 합니다."
+    },
+    {
+      "name": "signal_self",
+      "source": "signal_self.c",
+      "summary": "raise()로 자기 자신에게 SIGUSR1을 보냅니다. 핸들러가 raise()가 반환하기 전에 실행되는 순서를 확인합니다.",
+      "steps": [
+        {
+          "cmd": "./signal_self",
+          "note": "before raise → received SIGUSR1 → after raise 순서로 출력"
+        },
+        {
+          "cmd": "strace -e trace=signal ./signal_self",
+          "note": "rt_sigaction, tgkill, rt_sigreturn 시스템 콜 확인"
+        }
+      ],
+      "manual": false,
+      "expect": "after raise"
+    },
+    {
+      "name": "block_pending",
+      "source": "block_pending.c",
+      "summary": "sigprocmask로 SIGINT를 블록한 동안 도착한 시그널이 보류(pending)되었다가 마스크를 푸는 순간 전달되는 것을 보여 주고, show 모드로 /proc의 SigPnd·ShdPnd·SigBlk를 이름으로 푼다.",
+      "steps": [
+        {
+          "cmd": "./block_pending hold 3 & sleep 1; kill -INT $!; ./block_pending show $!; wait",
+          "note": "블록 중 보낸 SIGINT가 ShdPnd에 INT로 쌓이고(SigBlk도 INT), 3초 뒤 풀리면서 핸들러 실행: ints=1"
+        },
+        {
+          "cmd": "./block_pending hold 1",
+          "note": "시그널이 없으면 after unblock: ints=0"
+        },
+        {
+          "cmd": "./block_pending show self",
+          "note": "자기 자신의 보류·블록 마스크(모두 비어 있음)"
+        },
+        {
+          "cmd": "./block_pending hold 99; echo \"exit=$?\"",
+          "note": "범위 밖 초는 usage, 종료 상태 2"
+        }
+      ],
+      "manual": false,
+      "expect": "after unblock: ints=1",
+      "notes": "프로그램이 안내하는 ./sigmask_show는 class09-01의 도구라 이 폴더에는 없다. 같은 터미널에서 show 모드로 대신 관찰한다. 직접 해 보려면 ./block_pending hold 5 실행 중 Ctrl-C를 누른다."
+    },
+    {
+      "name": "suspend_demo",
+      "source": "suspend_demo.c",
+      "summary": "SIGUSR1을 블록한 채 보류시켜 놓고 pause는 깨어나지 못해 alarm에 구제되지만, sigsuspend는 마스크를 원자적으로 바꿔 즉시 깨어나고 돌아올 때 마스크를 복구함을 비교한다.",
+      "steps": [
+        {
+          "cmd": "./suspend_demo suspend",
+          "note": "보류 중인 SIGUSR1을 바로 받아 0.00초에 깨어나고 마스크가 복구된다"
+        },
+        {
+          "cmd": "./suspend_demo pause",
+          "note": "보류된(블록된) 시그널은 pause를 깨우지 못해 3초 뒤 SIGALRM으로 깨어난다. 마스크를 풀어야 USR1 전달"
+        },
+        {
+          "cmd": "./suspend_demo; echo \"exit=$?\"",
+          "note": "인자가 없으면 usage, 종료 상태 2"
+        }
+      ],
+      "manual": false,
+      "expect": "woke at once"
+    },
+    {
+      "name": "safe_flag",
+      "source": "safe_flag.c",
+      "summary": "핸들러에서 errno를 저장·복원하고 write와 volatile sig_atomic_t 플래그만 쓰는 async-signal-safe 규범을 보여 준다. 보고는 main이 플래그를 보고 한다.",
+      "steps": [
+        {
+          "cmd": "./safe_flag self 3",
+          "note": "raise할 때마다 핸들러가 실행되어 flag가 1씩 증가, errno(77)는 보존된다"
+        },
+        {
+          "cmd": "./safe_flag wait 3 & sleep 1; kill -INT $!; wait",
+          "note": "대기 중 받은 SIGINT를 센다: received 1 SIGINT in 3s"
+        },
+        {
+          "cmd": "./safe_flag wait 2",
+          "note": "시그널이 없으면 received 0"
+        },
+        {
+          "cmd": "./safe_flag self 100; echo \"exit=$?\"",
+          "note": "범위 밖 N은 usage, 종료 상태 2"
+        }
+      ],
+      "manual": false,
+      "expect": "received 1 SIGINT in 3s",
+      "notes": "직접 해 보려면 ./safe_flag wait 5 를 실행하고 Ctrl-C를 여러 번 누른다(종료되지 않고 횟수만 센다)."
+    },
+    {
+      "name": "chld_reap",
+      "source": "chld_reap.c",
+      "summary": "여러 자식을 fork하고 SIGCHLD 핸들러는 플래그만 세운 뒤 main 루프가 waitpid(-1, WNOHANG)로 좀비를 수거한다. 다 수거하면 ECHILD가 돌아온다.",
+      "steps": [
+        {
+          "cmd": "./chld_reap 4",
+          "note": "자식이 끝날 때마다 [handler] SIGCHLD → reaped, 종료 코드 1~4(raw 0x0100~0x0400), 마지막에 ECHILD"
+        },
+        {
+          "cmd": "./chld_reap 8",
+          "note": "자식 8명: 만들어진 순서대로 0.2~0.9초 뒤 끝나며 차례로 수거된다"
+        },
+        {
+          "cmd": "./chld_reap 9; echo \"exit=$?\"",
+          "note": "범위 밖(1-8)은 usage, 종료 상태 2"
+        }
+      ],
+      "manual": false,
+      "expect": "all reaped, no zombies",
+      "notes": "SIGCHLD가 오면 바로 수거하므로 좀비 상태(Z)는 아주 짧게만 존재해 눈으로 잡기 어렵다."
+    },
+    {
+      "name": "usr_round",
+      "source": "usr_round.c",
+      "summary": "부모가 kill로 자식에게 SIGUSR1을 보내면 자식 핸들러가 SIGUSR2로 회신하는 왕복을 R번 반복해, PID로 대상을 지정하는 프로세스 간 시그널 통신을 보여 준다.",
+      "steps": [
+        {
+          "cmd": "./usr_round 2",
+          "note": "[child handler] → [parent handler] → round n/2 done 순서로 두 번 왕복"
+        },
+        {
+          "cmd": "./usr_round",
+          "note": "기본 4회 왕복 뒤 자식 exited, status=0"
+        },
+        {
+          "cmd": "./usr_round 11; echo \"exit=$?\"",
+          "note": "범위 밖(1-10)은 usage, 종료 상태 2"
+        }
+      ],
+      "manual": false,
+      "expect": "parent done: received 4 rounds of USR2"
+    }
+  ]
+}

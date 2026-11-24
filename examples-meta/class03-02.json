@@ -1,0 +1,48 @@
+{
+  "class": "class03-02",
+  "title": "견고한 I/O와 파일 복사",
+  "summary": "read의 반환 길이를 관찰하고, 부분 쓰기와 EINTR를 처리하는 write_all을 검증한 뒤 이를 이용한 파일 복사 프로그램을 실행한다.",
+  "examples": [
+    {
+      "name": "file_copy",
+      "source": "file_copy.c",
+      "summary": "4096바이트 버퍼로 read한 만큼 write_all로 새 파일에 기록해 복사한다. 목적지는 O_CREAT | O_EXCL로 열기 때문에 기존 파일을 덮어쓰지 않는다.",
+      "steps": [
+        { "cmd": "printf 'ABCDEFGHIJ\\n' > in.txt; rm -f copy.txt; ./file_copy in.txt copy.txt; echo \"exit=$?\"", "note": "첫 복사는 성공한다(상태 0)." },
+        { "cmd": "cat copy.txt; wc -c in.txt copy.txt", "note": "내용과 크기(11바이트)가 원본과 같다." },
+        { "cmd": "./file_copy in.txt copy.txt; echo \"exit=$?\"", "note": "목적지가 이미 있으면 File exists로 실패(상태 1)하고 기존 파일은 보존된다." },
+        { "cmd": "./file_copy missing.txt new.txt; echo \"exit=$?\"; ls new.txt", "note": "입력이 없으면 목적지를 만들기 전에 실패하므로 new.txt는 생기지 않는다." },
+        { "cmd": "dd if=/dev/zero of=big.bin bs=1000 count=10 2>/dev/null; rm -f big.copy; strace -e trace=openat,read,write,close ./file_copy big.bin big.copy", "note": "10000바이트를 4096, 4096, 1808, 0 순서로 읽고 같은 길이만큼 쓰는 것을 확인한다. 앞부분은 라이브러리 로딩이다." },
+        { "cmd": "wc -c big.bin big.copy", "note": "두 파일 모두 10000바이트다." }
+      ],
+      "manual": false,
+      "expect": "File exists"
+    },
+    {
+      "name": "read_chunks",
+      "source": "read_chunks.c",
+      "summary": "4바이트 버퍼로 read를 반복하며 반환값을 stderr에, 읽은 데이터를 stdout에 내보낸다. 짧은 read와 EOF(0)를 구별해 본다.",
+      "steps": [
+        { "cmd": "printf ABCDEFGHIJ > in.txt; ./read_chunks in.txt; echo", "note": "read 반환값 4, 4, 2, 0과 데이터 조각이 번갈아 나온다. 2도 성공이고 0이 EOF다." },
+        { "cmd": "./read_chunks in.txt > out.txt; wc -c in.txt out.txt", "note": "stdout만 파일로 보내면 진단 메시지는 화면에 남고 데이터 10바이트만 복사된다." },
+        { "cmd": ": > empty.txt; ./read_chunks empty.txt; echo \"exit=$?\"", "note": "빈 파일은 첫 read가 바로 0을 반환한다." },
+        { "cmd": "./read_chunks in.txt > /dev/full; echo \"exit=$?\"", "note": "/dev/full에 쓰면 ENOSPC가 발생해 write 오류 메시지와 종료 상태 1이 나온다." }
+      ],
+      "manual": false,
+      "expect": "read returned 2"
+    },
+    {
+      "name": "test_write_all",
+      "source": "test_write_all.c",
+      "summary": "write를 가짜 함수로 바꿔 부분 쓰기, EINTR, 0 반환, ENOSPC, EAGAIN 등을 재현하고 io_helpers.h의 write_all 완성본을 assert로 검사한다.",
+      "steps": [
+        { "cmd": "./test_write_all; echo \"exit=$?\"", "note": "여덟 가지 시나리오가 모두 PASS이고 종료 상태는 0이다." },
+        { "cmd": "./test_write_all | grep 'partial'", "note": "부분 쓰기 시나리오: 4바이트 성공 → EINTR → 2 → 4로 요청 길이가 10, 6, 6, 4로 줄어든다." },
+        { "cmd": "./test_write_all | grep -c PASS", "note": "통과한 검사 수가 8인지 센다." }
+      ],
+      "manual": false,
+      "expect": "PASS partial writes and EINTR: requests 10,6,6,4",
+      "notes": "python3·make·gcc가 없어 test_copy.py와 student/io_helpers.h를 직접 구현해 보는 make test-student 과제는 이 VM에서 실행할 수 없다."
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>3주차 2차시 · text-binary 텍스트와 바이너리 파일 입출력 실습 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body data-root="../../">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><span>3주차 2차시 · text-binary</span></nav>
+  <header>
+    <h1>텍스트와 바이너리 파일 입출력 실습</h1>
+    <p>텍스트 예제로 FD 함수(open/read/write/lseek)를 복습하고, int 3개짜리 바이너리 파일로 FILE* 함수(fopen/fread/fwrite/fseek)를 익힌다.</p>
+  </header>
+  <main class="list">
+    <ul class="cards">
+      <li><a href="file_write.html"><strong>file_write</strong><span>open에 O_TRUNC 또는 O_APPEND를 주고 write_all로 TEXT 바이트를 그대로 기록한다. 덮어쓰기와 추가, 그리고 쓰기 오류 처리를 확인한다.</span></a></li>
+      <li><a href="file_read.html"><strong>file_read</strong><span>16바이트 버퍼로 EOF(read가 0 반환)까지 반복해서 읽고 읽은 만큼만 표준 출력에 쓴다. 텍스트든 바이너리든 바이트 그대로 전달한다.</span></a></li>
+      <li><a href="file_seek.html"><strong>file_seek</strong><span>lseek로 바이트 위치를 옮겨 수정 전 내용을 읽어 보여 주고, 같은 위치로 다시 이동해 TEXT를 덮어쓴다.</span></a></li>
+      <li><a href="binary_write.html"><strong>binary_write</strong><span>fopen(&quot;wb&quot;)으로 열어 int 배열 {10, 20, 30}을 fwrite로 헤더 없이 그대로 저장한다.</span></a></li>
+      <li><a href="binary_read.html"><strong>binary_read</strong><span>fopen(&quot;rb&quot;)과 fread로 int 3개를 읽어 십진수로 출력한다. 항목이 부족하거나 뒤에 데이터가 더 있으면 오류로 처리한다.</span></a></li>
+      <li><a href="binary_seek.html"><strong>binary_seek</strong><span>fseek로 INDEX * sizeof(int) 위치로 이동해 항목 하나를 fread로 읽거나, r+b 모드에서 fwrite로 그 항목만 수정한다.</span></a></li>
+      <li><a href="test_write_all.html"><strong>test_write_all</strong><span>write를 가짜 함수(scripted_write)로 바꿔 부분 쓰기, EINTR, 0 반환, ENOSPC 등의 상황을 재현하고 io_helpers.h의 write_all이 올바르게 처리하는지 assert로 검사한다.</span></a></li>
+    </ul>
+  </main>
+</body>
+</html>

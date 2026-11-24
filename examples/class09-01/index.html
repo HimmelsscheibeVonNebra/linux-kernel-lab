@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>9주차 1차시 시그널: 종료 상태·처리·관찰 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body data-root="../../">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><span>9주차 1차시</span></nav>
+  <header>
+    <h1>시그널: 종료 상태·처리·관찰</h1>
+    <p>종료 상태 워드 해석, sigaction으로 시그널 잡기·무시하기, alarm과 EINTR·SA_RESTART, /proc의 시그널 마스크, 시그널 번호·이름 표를 다룬다.</p>
+  </header>
+  <main class="list">
+    <ul class="cards">
+      <li><a href="exit_how.html"><strong>exit_how</strong><span>자식을 exit·abort·SIGSEGV·SIGTERM 등으로 끝내고 부모가 waitpid의 status를 WIFEXITED/WIFSIGNALED/WIFSTOPPED/WIFCONTINUED로 해석해 raw 값과 함께 출력한다.</span></a></li>
+      <li><a href="catch_int.html"><strong>catch_int</strong><span>sigaction으로 SIGINT는 잡아서 세고(3번이면 종료), SIGTERM은 정리 후 종료, SIGQUIT은 무시하며, SIGKILL은 바꿀 수 없음(EINVAL)을 보여 준다.</span></a></li>
+      <li><a href="timeout_read.html"><strong>timeout_read</strong><span>alarm으로 read에 시간 제한을 걸고, 핸들러 없음(기본 동작 종료)·핸들러 있음(EINTR)·SA_RESTART(read 재시작) 세 경우를 비교한다.</span></a></li>
+      <li><a href="sigmask_show.html"><strong>sigmask_show</strong><span>/proc/PID/status의 SigPnd·ShdPnd·SigBlk·SigIgn·SigCgt 비트마스크를 시그널 이름으로 풀어 보여 준다(인자가 없으면 자기 자신).</span></a></li>
+      <li><a href="sig_names.html"><strong>sig_names</strong><span>시그널 번호 1~31의 이름, strsignal 설명, 기본 동작(Term·Core·Stop·Cont·Ignore)을 표로 보여 주는 참조 도구다.</span></a></li>
+    </ul>
+  </main>
+</body>
+</html>

@@ -1,0 +1,66 @@
+{
+  "class": "class03-01",
+  "title": "복습과 파일 프로그램 4개",
+  "summary": "open·write·read·lseek·close 시스템 콜로 파일을 만들고, 쓰고, 끝까지 읽고, 지정 위치를 수정하는 네 프로그램을 실행한다.",
+  "examples": [
+    {
+      "name": "file_create",
+      "source": "file_create.c",
+      "summary": "open(O_WRONLY | O_CREAT | O_EXCL, 0666)으로 빈 파일을 새로 만들고 close한다. 이미 있는 파일이면 실패하며, 실제 권한은 umask에 따라 정해진다.",
+      "steps": [
+        { "cmd": "rm -f note.txt; ./file_create note.txt; echo \"exit=$?\"", "note": "새 파일 생성에 성공하면 종료 상태는 0이다." },
+        { "cmd": "ls -l note.txt", "note": "크기가 0바이트인 파일도 권한·소유자 등 메타데이터를 가진다." },
+        { "cmd": "./file_create note.txt; echo \"exit=$?\"", "note": "O_EXCL 때문에 File exists 오류가 나고 종료 상태는 1이다. 기존 파일은 그대로다." },
+        { "cmd": "rm -f mask022.txt mask027.txt; (umask 022; ./file_create mask022.txt); (umask 027; ./file_create mask027.txt); ls -l mask022.txt mask027.txt", "note": "0666 & ~umask 결과로 권한이 각각 rw-r--r--(0644), rw-r-----(0640)이 된다." },
+        { "cmd": "rm -f traced.txt; strace -e trace=openat,close ./file_create traced.txt", "note": "마지막 openat 호출의 O_CREAT|O_EXCL 플래그와 반환된 fd(보통 3)를 찾는다. 앞부분은 공유 라이브러리 로딩이다." }
+      ],
+      "manual": false,
+      "expect": "File exists"
+    },
+    {
+      "name": "file_write",
+      "source": "file_write.c",
+      "summary": "truncate 모드는 O_TRUNC, append 모드는 O_APPEND로 파일을 열어 TEXT 바이트만 그대로 write한다. 덮어쓰기와 추가의 차이를 보여 준다.",
+      "steps": [
+        { "cmd": "./file_write truncate note.txt ABCDEFGHIJ; cat note.txt; echo", "note": "파일이 없으면 만들고 10바이트를 쓴다. 개행은 저장되지 않는다." },
+        { "cmd": "./file_write truncate note.txt XY; cat note.txt; echo", "note": "O_TRUNC가 기존 내용을 지우므로 XY만 남는다." },
+        { "cmd": "./file_write append note.txt ZZ; cat note.txt; echo", "note": "O_APPEND는 끝에 덧붙이므로 XYZZ가 된다." },
+        { "cmd": "wc -c < note.txt", "note": "파일 크기는 정확히 4바이트다." },
+        { "cmd": "./file_write other note.txt X; echo \"exit=$?\"", "note": "모르는 모드는 Unknown mode 오류와 종료 상태 2로 거부한다." }
+      ],
+      "manual": false,
+      "expect": "XYZZ"
+    },
+    {
+      "name": "file_read",
+      "source": "file_read.c",
+      "summary": "16바이트 버퍼로 read를 반복해 0(EOF)이 나올 때까지 읽고, 실제 읽은 바이트 수만큼만 표준 출력에 쓴다.",
+      "steps": [
+        { "cmd": "printf '0123456789abcdefghijklmnopqrstuv' > long.txt; ./file_read long.txt; echo", "note": "32바이트 파일 내용이 그대로 출력된다." },
+        { "cmd": "strace -e trace=read ./file_read long.txt > /dev/null", "note": "마지막 세 read의 반환값 16, 16, 0을 찾는다. 0이 EOF다. 앞쪽 read는 라이브러리 로딩이다." },
+        { "cmd": "./file_read long.txt > copy.txt; wc -c long.txt copy.txt", "note": "복사본 크기가 원본과 같은 32바이트인지 확인한다." },
+        { "cmd": "printf 'A\\000B' > binary.dat; ./file_read binary.dat | hexdump -C", "note": "NUL 바이트(00)도 길이 기반으로 그대로 전달된다: 41 00 42." },
+        { "cmd": ": > empty.txt; ./file_read empty.txt; echo \"exit=$?\"", "note": "빈 파일은 첫 read가 0을 반환하며 정상 종료(0)한다." },
+        { "cmd": "./file_read missing.txt; echo \"exit=$?\"", "note": "없는 파일은 open이 실패해 오류 메시지와 종료 상태 1이 나온다." }
+      ],
+      "manual": false,
+      "expect": "0123456789abcdefghijklmnopqrstuv"
+    },
+    {
+      "name": "file_seek",
+      "source": "file_seek.c",
+      "summary": "lseek로 지정한 바이트 위치로 이동해 최대 16바이트를 읽어 보여 준 뒤, 다시 같은 위치로 lseek해서 TEXT를 덮어쓴다.",
+      "steps": [
+        { "cmd": "printf 'ABCDEFGHIJ' > note.txt; ./file_seek note.txt 3 XY; echo", "note": "stderr에 안내문, stdout에 수정 전 내용 DEFGHIJ(오프셋 3부터 7바이트)가 나온다." },
+        { "cmd": "cat note.txt; echo", "note": "삽입이 아니라 덮어쓰기이므로 ABCXYFGHIJ, 길이는 그대로 10바이트다." },
+        { "cmd": "./file_seek note.txt 10 '!'; echo; cat note.txt; echo", "note": "파일 끝(오프셋 10)에서는 0바이트를 읽고, 쓰면 파일이 1바이트 늘어난다." },
+        { "cmd": "./file_seek note.txt 13 Z; echo; hexdump -C note.txt", "note": "끝 너머에 쓰면 크기가 14바이트로 늘고 사이 영역은 00으로 읽힌다." },
+        { "cmd": "./file_seek note.txt -1 X; echo \"exit=$?\"", "note": "음수 오프셋은 인자 오류로 종료 상태 2다. 파일은 바뀌지 않는다." },
+        { "cmd": "printf 'ABCDEFGHIJ' > note.txt; strace -e trace=openat,read,write,lseek,_llseek,close ./file_seek note.txt 3 XY", "note": "위치 이동 → read → 다시 위치 이동 → write 순서를 확인한다." }
+      ],
+      "manual": false,
+      "expect": "ABCXYFGHIJ",
+      "notes": "32비트 환경이라 off_t가 32비트다. 2147483647보다 큰 오프셋은 'Offset is too large for off_t'로 거부된다. 또 i686 glibc에서는 lseek()가 strace에 _llseek 시스템 콜로 보일 수 있다."
+    }
+  ]
+}

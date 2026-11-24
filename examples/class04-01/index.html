@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>4주차 1차시 리눅스 파일과 디렉토리 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body data-root="../../">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><span>4주차 1차시</span></nav>
+  <header>
+    <h1>리눅스 파일과 디렉토리</h1>
+    <p>lstat으로 파일 종류·inode·링크 수를 조회하고, mkdir·opendir/readdir·chdir·rmdir로 디렉토리를 다루는 예제입니다.</p>
+  </header>
+  <main class="list">
+    <ul class="cards">
+      <li><a href="mystat.html"><strong>mystat</strong><span>lstat(2)으로 경로의 종류, device, inode, 링크 수, 권한, 소유자, 크기를 출력합니다. 마지막 심볼릭 링크는 따라가지 않습니다.</span></a></li>
+      <li><a href="mini_ls.html"><strong>mini_ls</strong><span>opendir/readdir로 디렉토리 항목을 읽고 fstatat(AT_SYMLINK_NOFOLLOW)으로 각 항목의 '종류 inode 크기 이름'을 출력하는 간단한 ls입니다.</span></a></li>
+      <li><a href="dir_create.html"><strong>dir_create</strong><span>mkdir(2)로 디렉토리를 하나 만듭니다. 요청 권한 0755에 umask가 적용되며, 이미 있거나 부모가 없으면 실패합니다.</span></a></li>
+      <li><a href="dir_list.html"><strong>dir_list</strong><span>opendir/readdir/closedir로 디렉토리의 이름 목록을 읽습니다. . 과 .. 도 출력하며, errno를 0으로 초기화해 끝과 오류를 구분합니다.</span></a></li>
+      <li><a href="dir_chdir.html"><strong>dir_chdir</strong><span>getcwd(3)로 현재 작업 디렉토리를 출력하고 chdir(2)로 옮긴 뒤 다시 출력합니다. 바뀌는 것은 이 프로세스의 위치뿐입니다.</span></a></li>
+      <li><a href="dir_remove.html"><strong>dir_remove</strong><span>rmdir(2)로 빈 디렉토리를 삭제합니다. 내용이 있는 디렉토리는 ENOTEMPTY로 실패하며 재귀 삭제는 하지 않습니다.</span></a></li>
+    </ul>
+  </main>
+</body>
+</html>

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>7주차 1차시 프로세스 기본: 주소 공간·상태·자원 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body data-root="../../">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><span>7주차 1차시</span></nav>
+  <header>
+    <h1>프로세스 기본: 주소 공간·상태·자원</h1>
+    <p>/proc와 표준 API로 프로세스의 가상 주소 공간, 실행 상태(S·R·T), FD 표, 자원 한계와 사용량을 직접 관찰한다.</p>
+  </header>
+  <main class="list">
+    <ul class="cards">
+      <li><a href="addr_show.html"><strong>addr_show</strong><span>전역(data·bss)·정적·지역(stack)·malloc(heap) 변수의 가상 주소를 출력하고, 지정한 초 동안 살아 있어 /proc/PID/maps와 대조할 수 있게 한다.</span></a></li>
+      <li><a href="maps_show.html"><strong>maps_show</strong><span>/proc/self/maps를 getline으로 읽어 [heap]·[stack] 행을 출력하고 전체 구역 수와 .so 매핑 수를 센다.</span></a></li>
+      <li><a href="state_show.html"><strong>state_show</strong><span>sleep으로 잠드는 모드(S)와 CPU를 놓지 않는 --busy 모드(R)를 만들어 /proc/PID/status의 State를 관찰하게 한다.</span></a></li>
+      <li><a href="hold_open.html"><strong>hold_open</strong><span>파일을 open한 채 지정한 초 동안 유지해 /proc/PID/fd에서 FD 표를 관찰하게 한다. open은 비어 있는 가장 작은 번호를 돌려준다.</span></a></li>
+      <li><a href="procdump.html"><strong>procdump</strong><span>getpid/getuid, getrlimit, getrusage와 /proc/self/status·/proc/self/fd를 묶어 프로세스의 신원·자원 한계·사용량을 한 보고서로 출력한다.</span></a></li>
+    </ul>
+  </main>
+</body>
+</html>

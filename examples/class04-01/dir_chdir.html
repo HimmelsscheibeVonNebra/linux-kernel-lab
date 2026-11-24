@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dir_chdir — 리눅스 파일과 디렉토리 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class04-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">4주차 1차시</a><span class="sep">/</span><span>dir_chdir</span></nav>
+  <header>
+    <h1>dir_chdir</h1>
+    <p>getcwd(3)로 현재 작업 디렉토리를 출력하고 chdir(2)로 옮긴 뒤 다시 출력합니다. 바뀌는 것은 이 프로세스의 위치뿐입니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class04-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="mkdir -p chdir_child" title="터미널에서 실행" aria-label="실행: mkdir -p chdir_child">▶</button><code>mkdir -p chdir_child</code></div>
+          <p>이동할 대상 디렉토리를 준비합니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="pwd" title="터미널에서 실행" aria-label="실행: pwd">▶</button><code>pwd</code></div>
+          <p>셸의 현재 위치를 기억해 둡니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./dir_chdir chdir_child" title="터미널에서 실행" aria-label="실행: ./dir_chdir chdir_child">▶</button><code>./dir_chdir chdir_child</code></div>
+          <p>before는 셸의 위치, after는 그 아래 chdir_child의 절대 경로입니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="pwd" title="터미널에서 실행" aria-label="실행: pwd">▶</button><code>pwd</code></div>
+          <p>부모 셸의 위치는 그대로입니다. chdir은 호출한 프로세스에만 적용됩니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./dir_chdir missing; echo &quot;status=$?&quot;" title="터미널에서 실행" aria-label="실행: ./dir_chdir missing; echo &quot;status=$?&quot;">▶</button><code>./dir_chdir missing; echo &quot;status=$?&quot;</code></div>
+          <p>before만 출력된 뒤 ENOENT로 실패합니다(종료 상태 1).</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="rmdir chdir_child" title="터미널에서 실행" aria-label="실행: rmdir chdir_child">▶</button><code>rmdir chdir_child</code></div>
+          <p>실습 디렉토리를 정리합니다.</p>
+        </li>
+      </ol>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>dir_chdir.c <span class="muted">37줄</span></summary>
+      <pre class="code"><code><span class="ln">#define _POSIX_C_SOURCE 200809L</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc != 2) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s DIRECTORY\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    /* 수업용 버퍼다. 경로가 더 길면 getcwd의 실패를 처리한다. */</span>
+<span class="ln">    char cwd[4096];</span>
+<span class="ln">    if (getcwd(cwd, sizeof cwd) == NULL) {</span>
+<span class="ln">        perror(&quot;getcwd before&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (printf(&quot;before: %s\n&quot;, cwd) &lt; 0 || fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln"> </span>
+<span class="ln">    /* 이 프로세스의 위치만 바뀐다. 실행한 부모 셸의 위치는 그대로다. */</span>
+<span class="ln">    if (chdir(argv[1]) == -1) {</span>
+<span class="ln">        perror(argv[1]);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (getcwd(cwd, sizeof cwd) == NULL) {</span>
+<span class="ln">        perror(&quot;getcwd after&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (printf(&quot;after: %s\n&quot;, cwd) &lt; 0 || fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="dir_list.html">← dir_list</a>
+    <a href="dir_remove.html">dir_remove →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

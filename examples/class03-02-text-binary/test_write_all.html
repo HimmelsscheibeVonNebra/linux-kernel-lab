@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>test_write_all — 텍스트와 바이너리 파일 입출력 실습 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class03-02-text-binary">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">3주차 2차시 · text-binary</a><span class="sep">/</span><span>test_write_all</span></nav>
+  <header>
+    <h1>test_write_all</h1>
+    <p>write를 가짜 함수(scripted_write)로 바꿔 부분 쓰기, EINTR, 0 반환, ENOSPC 등의 상황을 재현하고 io_helpers.h의 write_all이 올바르게 처리하는지 assert로 검사한다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class03-02-text-binary</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./test_write_all; echo &quot;exit=$?&quot;" title="터미널에서 실행" aria-label="실행: ./test_write_all; echo &quot;exit=$?&quot;">▶</button><code>./test_write_all; echo &quot;exit=$?&quot;</code></div>
+          <p>여덟 가지 시나리오가 모두 PASS이고 종료 상태는 0이다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./test_write_all | grep -c PASS" title="터미널에서 실행" aria-label="실행: ./test_write_all | grep -c PASS">▶</button><code>./test_write_all | grep -c PASS</code></div>
+          <p>통과한 검사 수가 8인지 센다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="strace -e trace=write ./test_write_all" title="터미널에서 실행" aria-label="실행: strace -e trace=write ./test_write_all">▶</button><code>strace -e trace=write ./test_write_all</code></div>
+          <p>실제 write 시스템 콜은 PASS 메시지 출력뿐이다. 검사 대상 write는 모두 가짜 함수로 대체되었다.</p>
+        </li>
+      </ol>
+      <p class="callout">python3가 없어 make test의 test_io.py는 실행할 수 없다. C 단위 테스트만 실행한다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>test_write_all.c <span class="muted">73줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;assert.h&gt;</span>
+<span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln">static ssize_t scripted_write(int fd, const void *data, size_t count);</span>
+<span class="ln">#define write scripted_write</span>
+<span class="ln">#ifdef STUDENT</span>
+<span class="ln">#include &quot;student/io_helpers.h&quot;</span>
+<span class="ln">#else</span>
+<span class="ln">#include &quot;io_helpers.h&quot;</span>
+<span class="ln">#endif</span>
+<span class="ln">#undef write</span>
+<span class="ln">static const unsigned char input[] = &quot;ABCDEFGHIJ&quot;;</span>
+<span class="ln">static unsigned char output[32];</span>
+<span class="ln">static ssize_t results[8];</span>
+<span class="ln">static int errors[8];</span>
+<span class="ln">static size_t steps, calls, sent;</span>
+<span class="ln">static ssize_t scripted_write(int fd, const void *data, size_t count)</span>
+<span class="ln">{</span>
+<span class="ln">    assert(fd == 9);</span>
+<span class="ln">    assert(calls &lt; steps);</span>
+<span class="ln">    assert(data == input + sent);</span>
+<span class="ln">    assert(count == 10 - sent);</span>
+<span class="ln">    ssize_t result = results[calls];</span>
+<span class="ln">    int error = errors[calls++];</span>
+<span class="ln">    if (result &lt; 0) { errno = error; return -1; }</span>
+<span class="ln">    assert((size_t)result &lt;= count);</span>
+<span class="ln">    memcpy(output + sent, data, (size_t)result);</span>
+<span class="ln">    sent += (size_t)result;</span>
+<span class="ln">    return result;</span>
+<span class="ln">}</span>
+<span class="ln">static void reset(const ssize_t *r, const int *e, size_t n)</span>
+<span class="ln">{</span>
+<span class="ln">    memset(output, 0, sizeof output);</span>
+<span class="ln">    memcpy(results, r, n * sizeof *r);</span>
+<span class="ln">    memcpy(errors, e, n * sizeof *e);</span>
+<span class="ln">    steps = n; calls = 0; sent = 0;</span>
+<span class="ln">}</span>
+<span class="ln">int main(void)</span>
+<span class="ln">{</span>
+<span class="ln">    (void)scripted_write; /* Starter may not call write yet. */</span>
+<span class="ln">    reset((ssize_t[]){10}, (int[]){0}, 1);</span>
+<span class="ln">    errno = EIO; /* stale errno must not turn success into failure */</span>
+<span class="ln">    assert(write_all(9, input, 10) == 0);</span>
+<span class="ln">    assert(calls == 1 &amp;&amp; sent == 10 &amp;&amp; memcmp(input, output, 10) == 0);</span>
+<span class="ln">    puts(&quot;PASS full write and stale errno&quot;);</span>
+<span class="ln">    reset((ssize_t[]){4,-1,2,4}, (int[]){0,EINTR,0,0}, 4);</span>
+<span class="ln">    assert(write_all(9, input, 10) == 0);</span>
+<span class="ln">    assert(calls == 4 &amp;&amp; sent == 10 &amp;&amp; memcmp(input, output, 10) == 0);</span>
+<span class="ln">    puts(&quot;PASS partial writes and EINTR: requests 10,6,6,4&quot;);</span>
+<span class="ln">    reset((ssize_t[]){-1,-1,10}, (int[]){EINTR,EINTR,0}, 3);</span>
+<span class="ln">    assert(write_all(9, input, 10) == 0 &amp;&amp; calls == 3);</span>
+<span class="ln">    puts(&quot;PASS repeated EINTR&quot;);</span>
+<span class="ln">    reset((ssize_t[]){4,0}, (int[]){0,0}, 2);</span>
+<span class="ln">    assert(write_all(9, input, 10) == -1 &amp;&amp; errno == EIO);</span>
+<span class="ln">    assert(calls == 2 &amp;&amp; sent == 4);</span>
+<span class="ln">    puts(&quot;PASS zero progress becomes EIO&quot;);</span>
+<span class="ln">    reset((ssize_t[]){4,-1}, (int[]){0,ENOSPC}, 2);</span>
+<span class="ln">    assert(write_all(9, input, 10) == -1 &amp;&amp; errno == ENOSPC);</span>
+<span class="ln">    assert(calls == 2 &amp;&amp; sent == 4 &amp;&amp; memcmp(input, output, 4) == 0);</span>
+<span class="ln">    puts(&quot;PASS partial data remains after ENOSPC&quot;);</span>
+<span class="ln">    reset((ssize_t[]){-1}, (int[]){EBADF}, 1);</span>
+<span class="ln">    assert(write_all(9, input, 10) == -1 &amp;&amp; errno == EBADF &amp;&amp; calls == 1);</span>
+<span class="ln">    puts(&quot;PASS immediate error&quot;);</span>
+<span class="ln">    reset((ssize_t[]){-1}, (int[]){EAGAIN}, 1);</span>
+<span class="ln">    assert(write_all(9, input, 10) == -1 &amp;&amp; errno == EAGAIN &amp;&amp; calls == 1);</span>
+<span class="ln">    puts(&quot;PASS EAGAIN is returned, not busy retried&quot;);</span>
+<span class="ln">    reset((ssize_t[]){0}, (int[]){0}, 0);</span>
+<span class="ln">    assert(write_all(9, input, 0) == 0 &amp;&amp; calls == 0);</span>
+<span class="ln">    puts(&quot;PASS empty request makes no write call&quot;);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+    <details class="source">
+      <summary>io_helpers.h <span class="muted">22줄</span></summary>
+      <pre class="code"><code><span class="ln">#ifndef IO_HELPERS_H</span>
+<span class="ln">#define IO_HELPERS_H</span>
+<span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;stddef.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln">/* Blocking descriptors. Retry interruptions and advance after partial writes. */</span>
+<span class="ln">static int write_all(int fd, const void *data, size_t count)</span>
+<span class="ln">{</span>
+<span class="ln">    const unsigned char *p = data;</span>
+<span class="ln">    while (count &gt; 0) {</span>
+<span class="ln">        ssize_t n = write(fd, p, count);</span>
+<span class="ln">        if (n == -1) {</span>
+<span class="ln">            if (errno == EINTR) continue;</span>
+<span class="ln">            return -1;</span>
+<span class="ln">        }</span>
+<span class="ln">        if (n == 0) { errno = EIO; return -1; }</span>
+<span class="ln">        p += (size_t)n;</span>
+<span class="ln">        count -= (size_t)n;</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln">#endif</span></code></pre>
+    </details>
+  </section>
+  <nav class="pager">
+    <a href="binary_seek.html">← binary_seek</a>
+    <span></span>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

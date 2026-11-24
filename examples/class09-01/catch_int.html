@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>catch_int — 시그널: 종료 상태·처리·관찰 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class09-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">9주차 1차시</a><span class="sep">/</span><span>catch_int</span></nav>
+  <header>
+    <h1>catch_int</h1>
+    <p>sigaction으로 SIGINT는 잡아서 세고(3번이면 종료), SIGTERM은 정리 후 종료, SIGQUIT은 무시하며, SIGKILL은 바꿀 수 없음(EINVAL)을 보여 준다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class09-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./catch_int &amp; sleep 1; ./sigmask_show $!" title="터미널에서 실행" aria-label="실행: ./catch_int &amp; sleep 1; ./sigmask_show $!">▶</button><code>./catch_int &amp; sleep 1; ./sigmask_show $!</code></div>
+          <p>SIGKILL 등록은 Invalid argument로 거절. SigIgn에 QUIT, SigCgt에 INT·TERM이 보인다</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="kill -QUIT $!; sleep 1; kill -0 $! &amp;&amp; echo still-alive" title="터미널에서 실행" aria-label="실행: kill -QUIT $!; sleep 1; kill -0 $! &amp;&amp; echo still-alive">▶</button><code>kill -QUIT $!; sleep 1; kill -0 $! &amp;&amp; echo still-alive</code></div>
+          <p>SIGQUIT은 무시되어 프로세스가 살아 있다</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="kill -INT $!; sleep 1; kill -INT $!; sleep 1; kill -INT $!; wait" title="터미널에서 실행" aria-label="실행: kill -INT $!; sleep 1; kill -INT $!; sleep 1; kill -INT $!; wait">▶</button><code>kill -INT $!; sleep 1; kill -INT $!; sleep 1; kill -INT $!; wait</code></div>
+          <p>핸들러가 세 번 실행되고 main: SIGINT x3 -&gt; exit 0</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./catch_int &amp; sleep 1; kill -TERM $!; wait" title="터미널에서 실행" aria-label="실행: ./catch_int &amp; sleep 1; kill -TERM $!; wait">▶</button><code>./catch_int &amp; sleep 1; kill -TERM $!; wait</code></div>
+          <p>SIGTERM을 잡아 정리 메시지를 내고 정상 종료</p>
+        </li>
+      </ol>
+      <p class="callout">터미널에서 직접 ./catch_int를 실행해 Ctrl-C 세 번, Ctrl-\를 눌러 보는 것이 원래 실습 흐름이다. 여기서는 kill로 같은 시그널을 보낸다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>catch_int.c <span class="muted">68줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;signal.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* sigaction으로 시그널마다 처리 방법을 정한다.</span>
+<span class="ln">   SIGINT : 잡아서 센다. 세 번째에 끝난다.</span>
+<span class="ln">   SIGTERM: 잡아서 정리 메시지를 내고 끝난다.</span>
+<span class="ln">   SIGQUIT: 무시한다(Ctrl-\를 눌러도 아무 일 없음).</span>
+<span class="ln">   SIGKILL: 바꾸려 해 보지만 커널이 EINVAL로 거절한다.</span>
+<span class="ln">   핸들러는 write와 플래그만 쓰고, printf는 main에서 한다.</span>
+<span class="ln">   플래그 검사와 pause 사이의 경쟁은 2차시(sigsuspend)에서 다룬다. */</span>
+<span class="ln"> </span>
+<span class="ln">static volatile sig_atomic_t ints = 0;</span>
+<span class="ln">static volatile sig_atomic_t got_term = 0;</span>
+<span class="ln"> </span>
+<span class="ln">static void on_int(int sig)</span>
+<span class="ln">{</span>
+<span class="ln">    static const char msg[] = &quot;  [handler] SIGINT\n&quot;;</span>
+<span class="ln">    (void)sig;</span>
+<span class="ln">    ssize_t r = write(STDOUT_FILENO, msg, sizeof msg - 1);</span>
+<span class="ln">    (void)r;                    /* 핸들러 안에서는 printf 대신 write */</span>
+<span class="ln">    ints++;                     /* 핸들러 실행 중에는 SIGINT가 막혀 있다 */</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static void on_term(int sig)</span>
+<span class="ln">{</span>
+<span class="ln">    (void)sig;</span>
+<span class="ln">    got_term = 1;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">static int set_action(int sig, void (*handler)(int))</span>
+<span class="ln">{</span>
+<span class="ln">    struct sigaction sa;</span>
+<span class="ln">    memset(&amp;sa, 0, sizeof sa);</span>
+<span class="ln">    sa.sa_handler = handler;</span>
+<span class="ln">    sigemptyset(&amp;sa.sa_mask);</span>
+<span class="ln">    sa.sa_flags = 0;</span>
+<span class="ln">    return sigaction(sig, &amp;sa, NULL);</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(void)</span>
+<span class="ln">{</span>
+<span class="ln">    if (set_action(SIGINT, on_int) == -1 || set_action(SIGTERM, on_term) == -1</span>
+<span class="ln">        || set_action(SIGQUIT, SIG_IGN) == -1) {</span>
+<span class="ln">        perror(&quot;sigaction&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (set_action(SIGKILL, SIG_IGN) == -1)</span>
+<span class="ln">        printf(&quot;sigaction(SIGKILL): %s\n&quot;, strerror(errno));</span>
+<span class="ln">    printf(&quot;pid=%ld  Ctrl-C: count (3 to quit)  Ctrl-\\: ignored  &quot;</span>
+<span class="ln">           &quot;kill -TERM %ld: clean exit\n&quot;, (long)getpid(), (long)getpid());</span>
+<span class="ln">    fflush(stdout);</span>
+<span class="ln"> </span>
+<span class="ln">    long seen = 0;</span>
+<span class="ln">    while (!got_term &amp;&amp; ints &lt; 3) {</span>
+<span class="ln">        pause();                /* 잡은 시그널의 핸들러가 끝나면 돌아온다 */</span>
+<span class="ln">        while (seen &lt; ints)</span>
+<span class="ln">            printf(&quot;main: SIGINT #%ld\n&quot;, ++seen);</span>
+<span class="ln">        fflush(stdout);</span>
+<span class="ln">    }</span>
+<span class="ln">    if (got_term)</span>
+<span class="ln">        printf(&quot;main: SIGTERM -&gt; cleanup, exit 0\n&quot;);</span>
+<span class="ln">    else</span>
+<span class="ln">        printf(&quot;main: SIGINT x3 -&gt; exit 0\n&quot;);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="exit_how.html">← exit_how</a>
+    <a href="timeout_read.html">timeout_read →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

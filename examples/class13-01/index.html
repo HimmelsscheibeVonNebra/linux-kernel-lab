@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>13주차 1차시 IPC와 POSIX 메시지 큐 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body data-root="../../">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><span>13주차 1차시</span></nav>
+  <header>
+    <h1>IPC와 POSIX 메시지 큐</h1>
+    <p>fork 뒤에는 메모리가 격리된다는 점에서 IPC의 필요성을 확인하고, POSIX 메시지 큐(mq_open · mq_send · mq_receive)의 우선순위·메시지 경계·블로킹과 요청/응답 큐를 쓰는 서버–클라이언트를 다루는 예제입니다.</p>
+  </header>
+  <main class="list">
+    <ul class="cards">
+      <li><a href="isolated.html"><strong>isolated</strong><span>fork 뒤에 자식이 전역 변수와 힙의 값을 고쳐도 부모에게는 보이지 않음을 보여 줍니다. 가상 주소는 같지만 서로 다른 메모리이며, 부모에게 돌아오는 것은 8비트 종료 상태뿐입니다.</span></a></li>
+      <li><a href="pmq.html"><strong>pmq</strong><span>POSIX 메시지 큐를 명령 하나씩으로 다룹니다: mq_open(O_CREAT | O_EXCL)으로 만들고, mq_send로 우선순위와 함께 넣고, mq_receive로 꺼내고, mq_getattr로 상태를 보고, mq_unlink로 지웁니다.</span></a></li>
+      <li><a href="mqserver.html"><strong>mqserver</strong><span>요청 큐 /w13_req 하나로 여러 클라이언트의 요청을 받아 대문자로 바꾼 뒤, 클라이언트마다 다른 응답 큐(/w13_rep.PID)로 돌려주는 서버입니다. SIGINT/SIGTERM을 받으면 큐를 지우고 끝납니다.</span></a></li>
+      <li><a href="mqclient.html"><strong>mqclient</strong><span>자기 응답 큐(/w13_rep.PID)를 먼저 만든 뒤 서버의 요청 큐에 요청을 넣고, mq_timedreceive로 최대 3초까지 답을 기다리는 클라이언트입니다. quit을 보내면 서버가 끝납니다.</span></a></li>
+    </ul>
+  </main>
+</body>
+</html>

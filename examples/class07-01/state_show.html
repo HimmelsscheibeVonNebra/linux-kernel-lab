@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>state_show — 프로세스 기본: 주소 공간·상태·자원 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class07-01">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">7주차 1차시</a><span class="sep">/</span><span>state_show</span></nav>
+  <header>
+    <h1>state_show</h1>
+    <p>sleep으로 잠드는 모드(S)와 CPU를 놓지 않는 --busy 모드(R)를 만들어 /proc/PID/status의 State를 관찰하게 한다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class07-01</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./state_show 2" title="터미널에서 실행" aria-label="실행: ./state_show 2">▶</button><code>./state_show 2</code></div>
+          <p>pid와 관찰 명령 안내, 1초마다 tick 출력</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./state_show 4 &gt; /dev/null &amp; sleep 1; grep State /proc/$!/status; wait" title="터미널에서 실행" aria-label="실행: ./state_show 4 &gt; /dev/null &amp; sleep 1; grep State /proc/$!/status; wait">▶</button><code>./state_show 4 &gt; /dev/null &amp; sleep 1; grep State /proc/$!/status; wait</code></div>
+          <p>잠자는 동안 State: S (sleeping)</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./state_show --busy 4 &gt; /dev/null &amp; sleep 1; grep State /proc/$!/status; wait" title="터미널에서 실행" aria-label="실행: ./state_show --busy 4 &gt; /dev/null &amp; sleep 1; grep State /proc/$!/status; wait">▶</button><code>./state_show --busy 4 &gt; /dev/null &amp; sleep 1; grep State /proc/$!/status; wait</code></div>
+          <p>바쁜 대기 중에는 State: R (running)</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./state_show 5 &gt; /dev/null &amp; sleep 1; kill -STOP $!; sleep 1; grep State /proc/$!/status; kill -CONT $!; wait" title="터미널에서 실행" aria-label="실행: ./state_show 5 &gt; /dev/null &amp; sleep 1; kill -STOP $!; sleep 1; grep State /proc/$!/status; kill -CONT $!; wait">▶</button><code>./state_show 5 &gt; /dev/null &amp; sleep 1; kill -STOP $!; sleep 1; grep State /proc/$!/status; kill -CONT $!; wait</code></div>
+          <p>SIGSTOP으로 멈추면 State: T (stopped), SIGCONT로 재개</p>
+        </li>
+      </ol>
+      <p class="callout">프로그램이 안내하는 'ps -o … -p PID'는 BusyBox ps가 -p를 지원하지 않으므로 /proc/PID/status로 대신 본다. CPU가 1개라 --busy 실행 중에는 셸 반응이 조금 느려질 수 있다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>state_show.c <span class="muted">72줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;string.h&gt;</span>
+<span class="ln">#include &lt;time.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">/* 이 프로그램은 스스로를 관찰 대상으로 만든다. 기본 모드는 1초씩</span>
+<span class="ln">   잠들어 ps의 STAT에서 S(sleeping)가, --busy 모드는 CPU를 놓지</span>
+<span class="ln">   않아 R(running/runnable)이 주로 보인다. busy 모드의 경과는</span>
+<span class="ln">   CLOCK_MONOTONIC으로 잰다. sleep은 중단되면 남은 시간을 돌려</span>
+<span class="ln">   줄 수 있지만 오늘은 1초 단위 관찰이 목적이므로 그대로 쓴다. */</span>
+<span class="ln"> </span>
+<span class="ln">static double now_sec(void)</span>
+<span class="ln">{</span>
+<span class="ln">    struct timespec ts;</span>
+<span class="ln">    if (clock_gettime(CLOCK_MONOTONIC, &amp;ts) == -1) {</span>
+<span class="ln">        perror(&quot;clock_gettime&quot;);</span>
+<span class="ln">        exit(1);</span>
+<span class="ln">    }</span>
+<span class="ln">    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;</span>
+<span class="ln">}</span>
+<span class="ln"> </span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    int busy = 0;</span>
+<span class="ln">    int first = 1;</span>
+<span class="ln">    long seconds = 10;</span>
+<span class="ln">    if (argc &gt; 1 &amp;&amp; strcmp(argv[1], &quot;--busy&quot;) == 0) {</span>
+<span class="ln">        busy = 1;</span>
+<span class="ln">        first = 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (argc - first &gt; 1) {</span>
+<span class="ln">        fprintf(stderr, &quot;usage: %s [--busy] [seconds 1-600]\n&quot;, argv[0]);</span>
+<span class="ln">        return 2;</span>
+<span class="ln">    }</span>
+<span class="ln">    if (argc - first == 1) {</span>
+<span class="ln">        char *end = NULL;</span>
+<span class="ln">        seconds = strtol(argv[first], &amp;end, 10);</span>
+<span class="ln">        if (end == argv[first] || *end != '\0' ||</span>
+<span class="ln">            seconds &lt; 1 || seconds &gt; 600) {</span>
+<span class="ln">            fprintf(stderr, &quot;usage: %s [--busy] [seconds 1-600]\n&quot;,</span>
+<span class="ln">                    argv[0]);</span>
+<span class="ln">            return 2;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;pid=%ld\n&quot;, (long)getpid());</span>
+<span class="ln">    printf(&quot;mode=%s seconds=%ld\n&quot;, busy ? &quot;busy&quot; : &quot;sleep&quot;, seconds);</span>
+<span class="ln">    printf(&quot;observe: ps -o pid,ppid,stat,time,%%cpu,command -p %ld\n&quot;,</span>
+<span class="ln">           (long)getpid());</span>
+<span class="ln">    printf(&quot;observe: grep State /proc/%ld/status\n&quot;, (long)getpid());</span>
+<span class="ln">    if (fflush(stdout) == EOF) {</span>
+<span class="ln">        perror(&quot;stdout&quot;);</span>
+<span class="ln">        return 1;</span>
+<span class="ln">    }</span>
+<span class="ln">    double start = now_sec();</span>
+<span class="ln">    for (long done = 1; done &lt;= seconds; done++) {</span>
+<span class="ln">        double next = start + (double)done;</span>
+<span class="ln">        if (busy) {</span>
+<span class="ln">            while (now_sec() &lt; next) {</span>
+<span class="ln">                /* R 관찰용: CPU를 놓지 않고 기다린다 */</span>
+<span class="ln">            }</span>
+<span class="ln">        } else {</span>
+<span class="ln">            sleep(1);</span>
+<span class="ln">        }</span>
+<span class="ln">        printf(&quot;tick=%ld of %ld\n&quot;, done, seconds);</span>
+<span class="ln">        if (fflush(stdout) == EOF) {</span>
+<span class="ln">            perror(&quot;stdout&quot;);</span>
+<span class="ln">            return 1;</span>
+<span class="ln">        }</span>
+<span class="ln">    }</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="maps_show.html">← maps_show</a>
+    <a href="hold_open.html">hold_open →</a>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>3주차 1차시 복습과 파일 프로그램 4개 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body data-root="../../">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><span>3주차 1차시</span></nav>
+  <header>
+    <h1>복습과 파일 프로그램 4개</h1>
+    <p>open·write·read·lseek·close 시스템 콜로 파일을 만들고, 쓰고, 끝까지 읽고, 지정 위치를 수정하는 네 프로그램을 실행한다.</p>
+  </header>
+  <main class="list">
+    <ul class="cards">
+      <li><a href="file_create.html"><strong>file_create</strong><span>open(O_WRONLY | O_CREAT | O_EXCL, 0666)으로 빈 파일을 새로 만들고 close한다. 이미 있는 파일이면 실패하며, 실제 권한은 umask에 따라 정해진다.</span></a></li>
+      <li><a href="file_write.html"><strong>file_write</strong><span>truncate 모드는 O_TRUNC, append 모드는 O_APPEND로 파일을 열어 TEXT 바이트만 그대로 write한다. 덮어쓰기와 추가의 차이를 보여 준다.</span></a></li>
+      <li><a href="file_read.html"><strong>file_read</strong><span>16바이트 버퍼로 read를 반복해 0(EOF)이 나올 때까지 읽고, 실제 읽은 바이트 수만큼만 표준 출력에 쓴다.</span></a></li>
+      <li><a href="file_seek.html"><strong>file_seek</strong><span>lseek로 지정한 바이트 위치로 이동해 최대 16바이트를 읽어 보여 준 뒤, 다시 같은 위치로 lseek해서 TEXT를 덮어쓴다.</span></a></li>
+    </ul>
+  </main>
+</body>
+</html>

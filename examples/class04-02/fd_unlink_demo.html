@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>fd_unlink_demo — 파일 속성 · Linux Lab</title>
+  <link rel="stylesheet" href="../../css/style.css">
+  <link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+  <script src="../../vendor/xterm/xterm.js"></script>
+  <script src="../../build/libv86.js"></script>
+</head>
+<body data-root="../../" data-lab-dir="class04-02">
+  <nav class="crumbs"><a href="../../index.html">Linux Lab</a><span class="sep">/</span><a href="index.html">4주차 2차시</a><span class="sep">/</span><span>fd_unlink_demo</span></nav>
+  <header>
+    <h1>fd_unlink_demo</h1>
+    <p>mkstemp로 만든 임시 파일을 unlink한 뒤에도 열린 FD로 fstat(links=0)과 read가 가능함을 보여 줍니다. 이름과 inode의 수명이 다르다는 예제입니다.</p>
+  </header>
+  <main>
+    <section class="machine">
+      <div class="toolbar">
+        <button id="reset" type="button">재부팅</button>
+        <label class="upload">파일 올리기<input id="upload" type="file" multiple hidden></label>
+        <span id="status" role="status">준비 중…</span>
+      </div>
+      <div class="terminal-wrap"><div id="terminal"></div></div>
+      <p class="hint"><code>/home/student/class04-02</code>에서 <code>student</code> 사용자로 시작합니다. 컴파일된 실행 파일과 소스가 이미 들어 있습니다. 새로고침하거나 재부팅하면 처음 상태로 돌아갑니다.</p>
+    </section>
+    <aside class="guide">
+      <h2>실행 순서</h2>
+      <ol class="steps">
+        <li>
+          <div class="cmd"><button type="button" data-cmd="./fd_unlink_demo" title="터미널에서 실행" aria-label="실행: ./fd_unlink_demo">▶</button><code>./fd_unlink_demo</code></div>
+          <p>before links=1 → after links=0, inode와 size=5는 그대로이고 path_lookup=ENOENT 뒤에도 read=hello가 나옵니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="ls /tmp | grep -c lsp-file-attrs" title="터미널에서 실행" aria-label="실행: ls /tmp | grep -c lsp-file-attrs">▶</button><code>ls /tmp | grep -c lsp-file-attrs</code></div>
+          <p>0이 출력됩니다. 종료 후 임시 파일 이름은 남지 않습니다.</p>
+        </li>
+        <li>
+          <div class="cmd"><button type="button" data-cmd="strace -e trace=unlink ./fd_unlink_demo" title="터미널에서 실행" aria-label="실행: strace -e trace=unlink ./fd_unlink_demo">▶</button><code>strace -e trace=unlink ./fd_unlink_demo</code></div>
+          <p>unlink 시스템 호출이 'after' 줄보다 먼저 일어나는 것을 확인합니다.</p>
+        </li>
+      </ol>
+      <p class="callout">인자를 받지 않습니다(인자를 주면 상태 2). 임시 파일은 tmpfs인 /tmp에 만들어집니다.</p>
+    </aside>
+  </main>
+  <section class="sources">
+    <h2>소스</h2>
+    <details class="source" open>
+      <summary>fd_unlink_demo.c <span class="muted">58줄</span></summary>
+      <pre class="code"><code><span class="ln">#include &lt;errno.h&gt;</span>
+<span class="ln">#include &lt;inttypes.h&gt;</span>
+<span class="ln">#include &lt;stdio.h&gt;</span>
+<span class="ln">#include &lt;stdlib.h&gt;</span>
+<span class="ln">#include &lt;sys/stat.h&gt;</span>
+<span class="ln">#include &lt;unistd.h&gt;</span>
+<span class="ln"> </span>
+<span class="ln">static int show(const char *label, int fd)</span>
+<span class="ln">{</span>
+<span class="ln">    struct stat st;</span>
+<span class="ln">    if (fstat(fd, &amp;st) == -1) { perror(&quot;fstat&quot;); return 1; }</span>
+<span class="ln">    printf(&quot;%s device=%ju inode=%ju links=%ju size=%jd\n&quot;, label,</span>
+<span class="ln">           (uintmax_t)st.st_dev, (uintmax_t)st.st_ino,</span>
+<span class="ln">           (uintmax_t)st.st_nlink, (intmax_t)st.st_size);</span>
+<span class="ln">    return 0;</span>
+<span class="ln">}</span>
+<span class="ln">int main(int argc, char **argv)</span>
+<span class="ln">{</span>
+<span class="ln">    if (argc != 1) { fprintf(stderr, &quot;usage: %s\n&quot;, argv[0]); return 2; }</span>
+<span class="ln">    char path[] = &quot;/tmp/lsp-file-attrs-XXXXXX&quot;;</span>
+<span class="ln">    int fd = mkstemp(path);</span>
+<span class="ln">    if (fd == -1) { perror(&quot;mkstemp&quot;); return 1; }</span>
+<span class="ln">    int result = 1, named = 1;</span>
+<span class="ln">    const char message[] = &quot;hello&quot;;</span>
+<span class="ln">    size_t done = 0;</span>
+<span class="ln">    while (done &lt; 5) {</span>
+<span class="ln">        ssize_t n = write(fd, message + done, 5 - done);</span>
+<span class="ln">        if (n == -1 &amp;&amp; errno == EINTR) continue;</span>
+<span class="ln">        if (n &lt;= 0) { if (n == 0) errno = EIO; perror(&quot;write&quot;); goto cleanup; }</span>
+<span class="ln">        done += (size_t)n;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;path=%s\n&quot;, path);</span>
+<span class="ln">    if (show(&quot;before&quot;, fd) != 0) goto cleanup;</span>
+<span class="ln">    if (unlink(path) == -1) { perror(&quot;unlink&quot;); goto cleanup; }</span>
+<span class="ln">    named = 0;</span>
+<span class="ln">    if (show(&quot;after&quot;, fd) != 0) goto cleanup;</span>
+<span class="ln">    struct stat st;</span>
+<span class="ln">    if (stat(path, &amp;st) != -1 || errno != ENOENT) {</span>
+<span class="ln">        fputs(&quot;expected missing path after unlink\n&quot;, stderr); goto cleanup;</span>
+<span class="ln">    }</span>
+<span class="ln">    puts(&quot;path_lookup=ENOENT&quot;);</span>
+<span class="ln">    if (lseek(fd, 0, SEEK_SET) == (off_t)-1) { perror(&quot;lseek&quot;); goto cleanup; }</span>
+<span class="ln">    char buf[6] = {0};</span>
+<span class="ln">    done = 0;</span>
+<span class="ln">    while (done &lt; 5) {</span>
+<span class="ln">        ssize_t n = read(fd, buf + done, 5 - done);</span>
+<span class="ln">        if (n == -1 &amp;&amp; errno == EINTR) continue;</span>
+<span class="ln">        if (n &lt;= 0) { if (n == 0) errno = EIO; perror(&quot;read&quot;); goto cleanup; }</span>
+<span class="ln">        done += (size_t)n;</span>
+<span class="ln">    }</span>
+<span class="ln">    printf(&quot;read=%s\n&quot;, buf);</span>
+<span class="ln">    result = 0;</span>
+<span class="ln">cleanup:</span>
+<span class="ln">    if (named &amp;&amp; unlink(path) == -1) { perror(&quot;cleanup unlink&quot;); result = 1; }</span>
+<span class="ln">    if (close(fd) == -1) { perror(&quot;close&quot;); result = 1; }</span>
+<span class="ln">    if (fflush(stdout) == EOF) { perror(&quot;stdout&quot;); result = 1; }</span>
+<span class="ln">    return result;</span>
+<span class="ln">}</span></code></pre>
+    </details>
+
+  </section>
+  <nav class="pager">
+    <a href="time_attrs.html">← time_attrs</a>
+    <span></span>
+  </nav>
+  <script src="../../js/lab.js"></script>
+</body>
+</html>

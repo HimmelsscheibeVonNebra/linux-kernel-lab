@@ -1,0 +1,78 @@
+{
+  "class": "class07-02",
+  "title": "프로세스 심화: 측정하고 실험하기",
+  "summary": "요구 페이징, /proc/PID/stat 해석, user·sys·대기 시간, 좀비·고아, 자원 한계 초과를 숫자로 측정하고 실험한다.",
+  "examples": [
+    {
+      "name": "pagetouch",
+      "source": "pagetouch.c",
+      "summary": "큰 블록을 malloc한 뒤 페이지를 하나씩 건드리며 VmRSS와 minor page fault(getrusage의 minflt) 변화를 단계별로 출력해 요구 페이징을 보여 준다.",
+      "steps": [
+        { "cmd": "./pagetouch 8", "note": "after_malloc에서는 rss가 그대로, touch_half·touch_all에서 rss와 minflt가 페이지 수만큼 증가" },
+        { "cmd": "./pagetouch 32", "note": "32MiB = 8192쪽: minflt 증가분을 먼저 예측해 보고 확인. touch_again에서는 늘지 않는다" },
+        { "cmd": "./pagetouch 0; echo \"exit=$?\"", "note": "범위 밖 인자는 usage, 종료 상태 2" }
+      ],
+      "manual": false,
+      "expect": "stage=after_free",
+      "notes": "게스트 RAM이 256MB이고 루트 파일 시스템도 RAM에 있으므로 작은 값(8~64)만 쓴다. 큰 값(수백 MiB)은 OOM으로 강제 종료되거나 32비트 주소 공간 한계로 malloc이 실패할 수 있다."
+    },
+    {
+      "name": "pstat",
+      "source": "pstat.c",
+      "summary": "/proc/PID/stat 한 줄을 해석해 상태·CPU 시간·메모리·폴트 수를 출력하고, 1초 간격 표본의 틱 차이로 %CPU를 계산하는 미니 top이다.",
+      "steps": [
+        { "cmd": "./pstat self", "note": "자기 자신: comm=(pstat) state=R, clk_tck 값 확인" },
+        { "cmd": "yes > /dev/null & ./pstat $! 3; kill $!; wait", "note": "CPU를 계속 쓰는 프로세스: state=R, cpu가 100% 근처" },
+        { "cmd": "sleep 5 & ./pstat $! 2; kill $!; wait", "note": "잠자는 프로세스: state=S, cpu=0%" },
+        { "cmd": "cp pstat 'a) b'; './a) b' self; rm -f 'a) b'", "note": "이름에 ')'와 공백이 있어도 마지막 ')'를 찾아 comm=(a) b)로 바르게 해석" },
+        { "cmd": "./pstat 999999999; echo \"exit=$?\"", "note": "없는 PID: cannot read 메시지와 종료 상태 1" }
+      ],
+      "manual": false,
+      "expect": "comm=(a) b)",
+      "notes": "README의 'cp /bin/sleep \"a) b\"' 방식은 BusyBox에서는 애플릿 이름이 달라져 실행되지 않으므로 pstat 자신을 복사해 쓴다. CPU가 1개라 %CPU는 측정 대상과 다른 프로세스가 나눠 쓴 결과다."
+    },
+    {
+      "name": "cpu_wait",
+      "source": "cpu_wait.c",
+      "summary": "같은 1초를 사용자 모드 계산(busy), 시스템 호출 반복(sys), 잠자기(sleep)로 보내고 getrusage로 user·sys CPU 시간과 자발적·비자발적 문맥 교환 횟수를 비교한다.",
+      "steps": [
+        { "cmd": "./cpu_wait", "note": "busy는 user≈1, sys는 sys 시간이 큼, sleep은 둘 다 0에 가깝고 nvcsw가 많다" },
+        { "cmd": "./cpu_wait sleep", "note": "한 모드만 실행: 약 10ms마다 자발적 문맥 교환(nvcsw)" },
+        { "cmd": "time ./cpu_wait busy", "note": "셸의 time이 보고하는 real/user/sys와 프로그램 출력 비교" },
+        { "cmd": "./cpu_wait nap; echo \"exit=$?\"", "note": "모르는 모드는 usage, 종료 상태 2" }
+      ],
+      "manual": false,
+      "expect": "mode=sleep",
+      "notes": "CPU가 1개인 VM이라 nivcsw(비자발적 교환)와 user/sys 비율은 실행마다 조금씩 다르다."
+    },
+    {
+      "name": "reap_show",
+      "source": "reap_show.c",
+      "summary": "fork한 자식이 먼저 끝났는데 부모가 waitpid를 미루면 좀비(Z)가 되고, 부모가 먼저 끝나면 고아가 되어 새 부모에게 입양되는 과정을 보여 준다.",
+      "steps": [
+        { "cmd": "./reap_show zombie 3 & sleep 1; grep -s State /proc/[0-9]*/status | grep Z; wait", "note": "회수 전 자식이 State: Z (zombie)로 보이고, 3초 뒤 reaped … exit_status=7" },
+        { "cmd": "grep -s State /proc/[0-9]*/status | grep -c Z", "note": "회수 뒤에는 좀비 항목이 사라진다(0)" },
+        { "cmd": "./reap_show orphan; sleep 3", "note": "부모가 먼저 종료: ppid_before(부모 PID) → ppid_after(보통 1, init)" },
+        { "cmd": "./reap_show; echo \"exit=$?\"", "note": "인자가 없으면 usage, 종료 상태 2" }
+      ],
+      "manual": false,
+      "expect": "exit_status=7",
+      "notes": "BusyBox ps는 -p 옵션이 없어 프로그램이 안내하는 ps 명령 대신 /proc/PID/status의 State로 확인한다. orphan 모드에서는 프롬프트가 돌아온 뒤 자식의 두 번째 줄이 출력된다."
+    },
+    {
+      "name": "limit_lab",
+      "source": "limit_lab.c",
+      "summary": "setrlimit으로 soft 한계(NOFILE·AS·CPU)를 낮춘 뒤 일부러 넘겨 EMFILE, ENOMEM, SIGXCPU가 각각 어떻게 나타나는지 확인한다.",
+      "steps": [
+        { "cmd": "./limit_lab nofile 16", "note": "13번 연 뒤 errno=24(EMFILE)로 실패: 16 - 표준 스트림 3개" },
+        { "cmd": "./limit_lab as 64", "note": "주소 공간 한계 64MiB에서 128MiB malloc → NULL, errno=12(ENOMEM)" },
+        { "cmd": "./limit_lab cpu 1; echo \"exit=$?\"", "note": "CPU 1초를 넘기면 SIGXCPU로 종료: exit=152 (128+24)" },
+        { "cmd": "kill -l 24", "note": "시그널 24번의 이름이 XCPU임을 확인" },
+        { "cmd": "(ulimit -n 20; ./limit_lab nofile 1024); ulimit -n", "note": "soft는 hard(20)를 넘을 수 없어 17번에서 실패하고, 셸의 한계는 그대로다" }
+      ],
+      "manual": false,
+      "expect": "malloc(128 MiB) = NULL",
+      "notes": "32비트에서는 size_t가 4바이트라 'as 2048' 이상은 요청 크기(2배)가 넘쳐 0이 되어 malloc이 성공으로 보고된다. 작은 값(16~512)으로 실험한다."
+    }
+  ]
+}
