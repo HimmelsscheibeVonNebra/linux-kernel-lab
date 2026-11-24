@@ -43,8 +43,14 @@
     // Example pages keep kernel chatter (boot log, segfault reports) off the
     // terminal; the kernel lab shows everything.
     cmdline: "console=ttyS0 rdinit=/init" + (labDir ? " loglevel=4 lab.dir=" + labDir : ""),
-    // Empty 9p filesystem; uploaded files appear in the guest at /mnt/host
-    filesystem: {},
+    // 9p filesystem, mounted at /mnt/9p in the guest.  Only the file list
+    // (fs.json) is loaded at boot; gcc's files are fetched when first opened.
+    //   /gcc  -> /opt/gcc   (gcc, binutils, glibc headers)
+    //   /host -> /mnt/host  (uploaded files)
+    filesystem: {
+      basefs: root + "images/9p/fs.json",
+      baseurl: root + "images/9p/base/",
+    },
     // Input goes through xterm.js only; keep v86 from grabbing page keys.
     disable_keyboard: true,
     disable_mouse: true,
@@ -124,7 +130,7 @@
     try {
       for (const file of files) {
         const data = new Uint8Array(await file.arrayBuffer());
-        await emulator.create_file("/" + file.name, data);
+        await emulator.create_file("/host/" + file.name, data);
       }
       setStatus(`올림: ${files.map((f) => "/mnt/host/" + f.name).join(", ")}`);
     } catch (err) {

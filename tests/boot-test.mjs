@@ -54,7 +54,7 @@ try {
   check("04 chardev: device node removed on rmmod", r.status === 0, r.out);
 
   // 9p file exchange (the "파일 올리기" button uses the same API)
-  await guest.createFile("/from-host.txt", new TextEncoder().encode("exchanged over 9p\n"));
+  await guest.createFile("/host/from-host.txt", new TextEncoder().encode("exchanged over 9p\n"));
   r = await sh("cat /mnt/host/from-host.txt");
   check("9p: file created on host side is visible in guest", r.out.includes("exchanged over 9p"), r.out);
 

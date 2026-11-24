@@ -1,0 +1,11 @@
+config BR2_PACKAGE_NATIVE_TOOLCHAIN
+	bool "native-toolchain"
+	depends on BR2_INSTALL_LIBSTDCPP # gcc is written in C++
+	help
+	  gcc and binutils that run on the target, with the target's
+	  glibc headers and libraries as their sysroot. Installed to
+	  images/toolchain/ (not the rootfs); the lab serves it to the
+	  guest over 9p and mounts it at /opt/gcc.
+
+comment "native-toolchain needs a toolchain w/ C++"
+	depends on !BR2_INSTALL_LIBSTDCPP

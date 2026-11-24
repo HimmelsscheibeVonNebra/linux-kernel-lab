@@ -1,5 +1,7 @@
 export TERM=xterm
 export TZ=Asia/Seoul
+# gcc, cc, as, ld ... from the 9p toolchain (downloaded on first use)
+[ -x /opt/gcc/bin/gcc ] && export PATH="$PATH:/opt/gcc/bin"
 # The serial terminal on the web page is 100x30.
 case "$(tty)" in /dev/ttyS*) stty rows 30 cols 100 ;; esac
 

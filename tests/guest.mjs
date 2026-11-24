@@ -27,7 +27,11 @@ export async function bootGuest(labDir = "") {
     initrd: { url: p("images/rootfs.cpio.gz") },
     // Same command line as js/lab.js
     cmdline: "console=ttyS0 rdinit=/init" + (labDir ? " loglevel=4 lab.dir=" + labDir : ""),
-    filesystem: {},
+    // Same 9p filesystem as js/lab.js
+    filesystem: {
+      basefs: p("images/9p/fs.json"),
+      baseurl: p("images/9p/base") + "/",
+    },
     autostart: true,
   });
 

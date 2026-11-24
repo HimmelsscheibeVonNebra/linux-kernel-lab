@@ -43,7 +43,18 @@ python3 -m http.server 8000
 | 커널 실습 페이지 | `root`, 모듈 `/root/*.ko`, 소스 `/root/src` |
 | 파일 올리기 | 페이지에서 올린 파일이 `/mnt/host` (9p)에 나타남 |
 
-게스트에는 컴파일러가 없습니다. 예제는 이미지 빌드 때 각 수업의 `Makefile`로 미리 컴파일됩니다.
+예제는 이미지 빌드 때 각 수업의 `Makefile`로 미리 컴파일되어 있고, 게스트 안에서 `gcc`(15.3, binutils 2.45)와 `make`로 다시 빌드할 수도 있습니다.
+
+### 게스트의 gcc
+
+컴파일러는 기본 이미지(`rootfs.cpio.gz`)에 넣지 않고 별도의 9p 파일시스템(`images/9p/`)으로 제공합니다. 페이지는 부팅할 때 파일 목록(`fs.json`)만 받고, 각 파일의 내용은 게스트가 처음 열 때 HTTP로 내려받습니다. 그래서 컴파일하지 않는 페이지는 추가로 받는 것이 없고, 처음 컴파일할 때만 `cc1` 등 필요한 파일을 받아 옵니다. 첫 컴파일에 약 17 MB(zstd 압축, 전체 9p 트리는 38 MB)를 받으며, 이후로는 새로고침 전까지 다시 받지 않습니다. `make`는 기본 이미지에 들어 있습니다.
+
+| 게스트 경로 | 9p 경로 | 내용 |
+|---|---|---|
+| `/opt/gcc` | `/gcc` | gcc, binutils, glibc 헤더·라이브러리(`/opt/gcc/sysroot`) |
+| `/mnt/host` | `/host` | 페이지에서 올린 파일 |
+
+gcc는 Buildroot의 크로스 툴체인으로 같은 소스·버전을 i686용으로 다시 빌드한 것입니다(`buildroot-external/package/native-toolchain/`). 9p 변환에는 v86의 `fs2json.py`, `copy-to-sha256.py`(`scripts/v86/`)를 씁니다.
 
 ## 예제 추가·수정
 
@@ -99,6 +110,7 @@ scripts/build-images.sh modules    # exercises/, sysprog/ 수정 후 해당 부�
 node tests/boot-test.mjs               # 커널 모듈 4종, 9p, 시계
 node tests/examples-test.mjs           # 모든 예제의 실행 순서
 node tests/examples-test.mjs class12-01   # 한 수업만
+node tests/gcc-test.mjs                # 게스트 gcc: hello, -static, 수업별 make
 ```
 
 브라우저 없이 v86으로 이미지를 부팅해, 페이지와 같은 직렬 콘솔 셸에 명령을 입력합니다. `VERBOSE=1`을 주면 게스트 콘솔 출력이 보이고, 예제 테스트의 전체 기록은 `tests/out/<수업>.log`에 남습니다.
@@ -110,10 +122,11 @@ node tests/examples-test.mjs class12-01   # 한 수업만
 ## 제약
 
 - v86은 32비트 단일 코어 에뮬레이터입니다. `long`과 `size_t`가 4바이트이고, CPU가 하나라 데이터 경쟁이 실제 장비보다 드물게 나타납니다. 예제별 차이는 각 페이지의 주의 사항에 적혀 있습니다.
-- systemd, gdb, 컴파일러, 네트워크가 없습니다. 해당 실습(서비스 등록, 디버깅, `make`)은 실제 Linux에서 진행합니다.
+- systemd, gdb, 네트워크가 없습니다. 해당 실습(서비스 등록, 디버깅)은 실제 Linux에서 진행합니다.
+- 에뮬레이터 안의 컴파일은 실제 PC보다 훨씬 느립니다. 수업 하나를 `make`로 전부 다시 빌드하는 데 수십 초에서 몇 분이 걸릴 수 있습니다.
 - 게스트 상태는 브라우저 메모리에만 있으며 새로고침하면 초기화됩니다.
 - GitHub Pages는 정적 호스팅이라 서버 측 빌드, 제출, 채점 기능은 없습니다.
 
 ## 라이선스 및 소스 제공
 
-배포되는 `images/`에는 Linux 커널(GPL-2.0), BusyBox(GPL-2.0), glibc(LGPL-2.1), strace(LGPL-2.1)가 들어 있습니다. 바이너리를 공개 배포할 때는 대응 소스를 제공해야 하며, 이 저장소의 Buildroot 설정과 `scripts/build-images.sh`로 동일한 소스를 내려받아 재현할 수 있습니다 (`make legal-info`로 소스 묶음 생성 가능). v86은 BSD-2-Clause(`build/LICENSE.v86`), xterm.js는 MIT(`vendor/xterm/LICENSE`), SeaBIOS는 LGPL-3.0입니다.
+배포되는 `images/`에는 Linux 커널(GPL-2.0), BusyBox(GPL-2.0), glibc(LGPL-2.1), strace(LGPL-2.1), GNU make(GPL-3.0), 그리고 `images/9p/`에 gcc·binutils(GPL-3.0)와 gmp·mpfr·mpc(LGPL-3.0)가 들어 있습니다. 바이너리를 공개 배포할 때는 대응 소스를 제공해야 하며, 이 저장소의 Buildroot 설정과 `scripts/build-images.sh`로 동일한 소스를 내려받아 재현할 수 있습니다 (`make legal-info`로 소스 묶음 생성 가능). v86은 BSD-2-Clause(`build/LICENSE.v86`), xterm.js는 MIT(`vendor/xterm/LICENSE`), SeaBIOS는 LGPL-3.0입니다.

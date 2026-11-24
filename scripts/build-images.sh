@@ -56,7 +56,16 @@ all|modules|rebuild)
 		done
 		br
 		cp output/images/bzImage output/images/rootfs.cpio.gz /src/images/
+
+		# 9p tree the pages serve on demand: /gcc = the guest toolchain,
+		# /host = where uploaded files land.
+		rm -rf 9p-tree /src/images/9p
+		mkdir -p 9p-tree/host /src/images/9p/base
+		cp -a output/images/toolchain/gcc 9p-tree/gcc
+		python3 /src/scripts/v86/fs2json.py --zstd --out /src/images/9p/fs.json 9p-tree
+		python3 /src/scripts/v86/copy-to-sha256.py --zstd 9p-tree /src/images/9p/base > /dev/null
 		ls -l /src/images/
+		du -sh 9p-tree/gcc /src/images/9p
 	'
 	;;
 *)
